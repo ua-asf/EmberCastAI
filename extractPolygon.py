@@ -44,7 +44,7 @@ for placemark in root.findall('.//kml:Placemark', namespace):
 if not coordinates:
     raise ValueError("No 'Heat Perimeter' layer found in the KML file")
 
-# Correctly parse the coordinates into a list of (longitude, latitude) tuples
+# Parse the coordinates into a list of (longitude, latitude) tuples
 coords = []
 raw_coordinates = coordinates.split()  # Split on whitespace to get individual coordinate triples
 
@@ -73,7 +73,7 @@ gdf = gpd.GeoDataFrame({'geometry': [polygon]}, crs="EPSG:4326")
 
 # Plot the polygon
 fig, ax = plt.subplots(figsize=(10, 10))
-gdf.plot(ax=ax, color='red', alpha=0.5, edgecolor='black')  # Red fill, black outline
+gdf.plot(ax=ax, facecolor='none', edgecolor='red', linewidth=2)  # No fill color, red perimeter 
 ax.set_axis_off()  # Remove axes
 
 # Save the image with a transparent background
