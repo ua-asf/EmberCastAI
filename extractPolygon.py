@@ -1,3 +1,8 @@
+# EmberCastAI - extractPolygon.py
+# Extracts wildfire polygon data from kmz files
+# Last Updated: 1/16/24
+
+# Libraries
 import zipfile
 import os
 import shutil 
