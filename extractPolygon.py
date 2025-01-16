@@ -7,7 +7,7 @@ from shapely.geometry import Polygon
 import matplotlib.pyplot as plt
 
 # Path to the KMZ file
-kmz_file = '/home/dmmaltos/Desktop/wildfire prediction/data/20240919_BachelorCx_IR(9).kmz'
+kmz_file = '/home/dmmaltos/Desktop/wildfire prediction/EmberCastAI/kmz_data/20240919_BachelorCx_IR.kmz'
 
 # Extract the KML file from the KMZ archive
 extracted_dir = 'extracted_kmz'
@@ -75,10 +75,20 @@ fig, ax = plt.subplots(figsize=(10, 10))
 gdf.plot(ax=ax, facecolor='red', edgecolor='red', linewidth=2)  # No fill color, red perimeter
 ax.set_axis_off()  # Remove axes
 
-# Save the image with a transparent background
+# Save the image as a geotiff
 output_geotiff = 'dataset/geotiff/heat_perimeter_polygons.tif'
 fig.savefig(output_geotiff, format='tiff', transparent=True, bbox_inches='tight', pad_inches=0)
 plt.close()
+
+# Save the image as a png
+output_png = 'dataset/png/heat_perimeter_polygons.png'
+fig.savefig(output_png, format='png', transparent=True, bbox_inches='tight', pad_inches=0)
+
+# Save raw polygon coordinates as a wkt
+output_wkt = 'dataset/coordinates/heat_perimeter_polygons.wkt'
+with open(output_wkt, 'w') as wkt:
+    for polygon in polygons:
+        wkt.write(f"{polygon.wkt}\n")
 
 # Remove the extracted directory
 try:
@@ -88,3 +98,4 @@ except Exception as e:
     print(f"Error deleting folder {extracted_dir}: {e}")
 
 print(f"Polygons saved as {output_geotiff}")
+print(f"Polygons saved as {output_png}")
