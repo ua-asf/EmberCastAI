@@ -1,6 +1,6 @@
 import zipfile
 import os
-import shutil  # For removing directories
+import shutil 
 from xml.etree import ElementTree as ET
 import geopandas as gpd
 from shapely.geometry import Polygon
@@ -42,7 +42,8 @@ for placemark in root.findall('.//kml:Placemark', namespace):
             coordinates = polygon.text.strip()
             if coordinates:
                 coords = []
-                raw_coordinates = coordinates.split()  # Split on whitespace to get individual coordinate strings
+                # Split on whitespace to get individual coordinate strings
+                raw_coordinates = coordinates.split() 
                 for triple in raw_coordinates:
                     try:
                         # Split the triple into components by commas
