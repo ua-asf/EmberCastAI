@@ -1,5 +1,6 @@
 import zipfile
 import os
+import shutil  # For removing directories
 from xml.etree import ElementTree as ET
 import geopandas as gpd
 from shapely.geometry import Polygon
@@ -31,54 +32,58 @@ root = tree.getroot()
 # Extract namespace
 namespace = {'kml': 'http://www.opengis.net/kml/2.2'}
 
-# Find the coordinates for the 'Heat Perimeter' layer
-coordinates = None
+# Collect all polygons from the 'Heat Perimeter' layer
+polygons = []
 for placemark in root.findall('.//kml:Placemark', namespace):
     name = placemark.find('./kml:name', namespace)
     if name is not None and 'Heat Perimeter' in name.text:
-        polygon = placemark.find('.//kml:Polygon/kml:outerBoundaryIs/kml:LinearRing/kml:coordinates', namespace)
-        if polygon is not None:
+        polygon_elements = placemark.findall('.//kml:Polygon/kml:outerBoundaryIs/kml:LinearRing/kml:coordinates', namespace)
+        for polygon in polygon_elements:
             coordinates = polygon.text.strip()
-            break
+            if coordinates:
+                coords = []
+                raw_coordinates = coordinates.split()  # Split on whitespace to get individual coordinate strings
+                for triple in raw_coordinates:
+                    try:
+                        # Split the triple into components by commas
+                        components = triple.split(',')
+                        # Process each group of three values (lon, lat, alt)
+                        for i in range(0, len(components) - 2, 3):  # Ensure we don't exceed bounds
+                            lon, lat, alt = map(float, components[i:i+3])  # Unpack the three values
+                            coords.append((lon, lat))
+                    except ValueError as e:
+                        print(f"Skipping invalid coordinate triple: {triple} ({e})")
 
-if not coordinates:
-    raise ValueError("No 'Heat Perimeter' layer found in the KML file")
 
-# Parse the coordinates into a list of (longitude, latitude) tuples
-coords = []
-raw_coordinates = coordinates.split()  # Split on whitespace to get individual coordinate triples
+                # Ensure the polygon is closed
+                if len(coords) > 0 and coords[0] != coords[-1]:
+                    coords.append(coords[0])
 
-for triple in raw_coordinates:
-    try:
-        triples = triple.split(',')
-        for i in range(0, len(triples), 3):
-            lon, lat, _ = map(float, triples[i:i+3])  # Split into lon, lat, alt
-            coords.append((lon, lat))
-    except ValueError as e:
-        print(f"Skipping invalid coordinate triple {triple}: {e}")
+                # Check if there are enough coordinates to form a polygon
+                if len(coords) >= 4:
+                    polygons.append(Polygon(coords))
 
-# Ensure the polygon is closed (first and last points must be identical)
-if len(coords) > 0 and coords[0] != coords[-1]:
-    coords.append(coords[0])
-
-# Check if there are enough coordinates to form a polygon
-if len(coords) < 4:
-    raise ValueError("Insufficient coordinates to form a polygon")
-
-# Create a Polygon from the coordinates
-polygon = Polygon(coords)
+if not polygons:
+    raise ValueError("No valid polygons found in the 'Heat Perimeter' layer")
 
 # Create a GeoDataFrame
-gdf = gpd.GeoDataFrame({'geometry': [polygon]}, crs="EPSG:4326")
+gdf = gpd.GeoDataFrame({'geometry': polygons}, crs="EPSG:4326")
 
-# Plot the polygon
+# Plot all polygons
 fig, ax = plt.subplots(figsize=(10, 10))
-gdf.plot(ax=ax, facecolor='none', edgecolor='red', linewidth=2)  # No fill color, red perimeter 
+gdf.plot(ax=ax, facecolor='red', edgecolor='red', linewidth=2)  # No fill color, red perimeter
 ax.set_axis_off()  # Remove axes
 
 # Save the image with a transparent background
-output_png = 'heat_perimeter_polygon.png'
-fig.savefig(output_png, format='png', transparent=True, bbox_inches='tight', pad_inches=0)
+output_geotiff = 'dataset/geotiff/heat_perimeter_polygons.tif'
+fig.savefig(output_geotiff, format='tiff', transparent=True, bbox_inches='tight', pad_inches=0)
 plt.close()
 
-print(f"Polygon saved as {output_png}")
+# Remove the extracted directory
+try:
+    shutil.rmtree(extracted_dir)
+    print(f"Deleted folder: {extracted_dir}")
+except Exception as e:
+    print(f"Error deleting folder {extracted_dir}: {e}")
+
+print(f"Polygons saved as {output_geotiff}")
