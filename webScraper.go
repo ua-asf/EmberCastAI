@@ -1,5 +1,5 @@
 // Dylan Maltos
-// webScraper.go
+// EmberCastAI - webScraper.go
 // Scrapes KMZ files from ftp.wildfire.gov into /kmz_data directory for extractPolygon.py to use
 // Last modified: 1/22/25
 
