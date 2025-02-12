@@ -1,6 +1,6 @@
 # Ignore these directories
 /dataset/coordinates/*
 /dataset/geotiff/*
-dataset/png/*
+/dataset/png/*
 /kmz_data/*
 /kmz_test_data
