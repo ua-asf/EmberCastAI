@@ -1,3 +1,4 @@
+# Dylan Maltos
 # EmberCastAI - extractPolygon.py
 # Extracts wildfire polygon data from kmz files
 # Last Updated: 2/12/25
