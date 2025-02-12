@@ -1,0 +1,4 @@
+# Ignore these directories
+/dataset/*
+/kmz_data/*
+/kmz_test_data
