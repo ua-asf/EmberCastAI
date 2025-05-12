@@ -1,20 +1,3 @@
-# Ignore all files inside these directories
-/dataset/coordinates/*
-/dataset/geotiff/*
-/dataset/png/*
-/kmz_data/*
-/kmz_test_data/*
-
-# Allow the directories themselves
-!/dataset/coordinates/
-!/dataset/geotiff/
-!/dataset/png/
-!/kmz_data/
-!/kmz_test_data/
-
-# Allow .gitkeep files to be tracked
-!/dataset/coordinates/.gitkeep
-!/dataset/geotiff/.gitkeep
-!/dataset/png/.gitkeep
-!/kmz_data/.gitkeep
-!/kmz_test_data/.gitkeep
+/dataset
+*.txt
+.env
