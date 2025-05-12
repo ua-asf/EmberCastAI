@@ -117,5 +117,3 @@ for dirpath, dirnames, filenames in os.walk('dataset'):
             # Copy file to organized structure
             dst_path = os.path.join(fire_folder, filename)
             shutil.copy2(file, dst_path)
-
-print("Files organized into folders with robust fire name/date extraction and local deduplication.")
