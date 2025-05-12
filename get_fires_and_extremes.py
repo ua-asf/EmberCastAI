@@ -1,9 +1,9 @@
 #!python
 
 import os
-import pprint
+from dotenv import load_dotenv
 from datetime import datetime
-import asf_search
+import asf_search as asf
 
 # Dates used by the dataset are usually in the format YYYYMMDD
 date_format_str = '%Y%m%d'
@@ -19,9 +19,7 @@ for dirpath, dirnames, filenames in os.walk('dataset/coordinates'):
     for filename in filenames:
         # Search for files with the .wkt extension
         if filename.endswith('.wkt'):
-            # Print the full path of the file
             file = os.path.join(dirpath, filename)
-            print(file)
             # Insert into fires list
             # Search for last list that contains the same beginning filepath
             fire_found = False
@@ -50,9 +48,6 @@ for dirpath, dirnames, filenames in os.walk('dataset/coordinates'):
                             continue
 
                 fires['/'.join(file_dir)] = [file]
-
-# Print the fires list
-pprint.pp(fires)
 
 # Find the lat/long extremes for each fire
 
@@ -92,29 +87,41 @@ for fire_name, data in fires.items():
             # Update the extremes for the fire
             extremes[fire_name] = (lat_min, lat_max, long_min, long_max)
 
-pprint.pp(extremes)
-
 total_data = 0
 
 for fire, data in fires.items():
     data_len = len(data)
     total_data += data_len
-    print(fire + ': ' + str(data_len) + ' files')
 
-print('Total fires: ' + str(len(fires)))
-print('Total data: ' + str(total_data))
+session = asf.ASFSession()
 
-fire = 'dataset/coordinates/calif_n/2019_FEDERAL_Incidents/CA-KNF-007074_Lime'
-data = extremes[fire]
+load_dotenv()
 
-polygon = f'POLYGON(( {data[2]} {data[1]}, {data[3]} {data[1]}, {data[3]} {data[0]}, {data[2]} {data[0]}, {data[2]} {data[1]} ))'
-results = len(asf_search.geo_search(intersectsWith=polygon, polarization=['VV+VH', 'HH+HV']))
-print(f'{fire}: {results}')
+# Get user and password credentials
+username = os.getenv('ASF_USERNAME')
+password = os.getenv('ASF_PASSWORD')
+if username is None or password is None:
+    raise ValueError('Please set the ASF_USERNAME and ASF_PASSWORD environment variables')
 
+# Authenticate the session
+session.auth_with_creds(username=username, password=password)
 
 # in the format (FIRENAME: (LATMIN, LATMAX, LONGMIN, LONGMAX))
 # or            (FIRENAME: (s_min,  n_max,  w_min,   e_max))
-# for fire, data in extremes.items():
-#     polygon = f'POLYGON(( {data[2]} {data[1]}, {data[3]} {data[1]}, {data[3]} {data[0]}, {data[2]} {data[0]}, {data[2]} {data[1]} ))'
-#     results = len(asf_search.geo_search(intersectsWith=polygon, polarization=['VV+VH', 'HH+HV']))
-#     print(f'{fire}: {results}')
+for fire, data in extremes.items():
+    # Check if the data is already downloaded
+    if os.path.exists(f'{fire}/downloaded'):
+        print(f'{fire} already downloaded')
+        continue
+
+    try:
+        polygon = f'POLYGON(( {data[2]} {data[1]}, {data[3]} {data[1]}, {data[3]} {data[0]}, {data[2]} {data[0]}, {data[2]} {data[1]} ))'
+        results = asf.geo_search(platform=[asf.PLATFORM.SENTINEL1], intersectsWith=polygon, polarization=['VV+VH', 'HH+HV'], start='1 month ago', end='now')
+        result = results.pop()
+        # Make directory for the fire
+        os.makedirs(f'{fire}/downloaded', exist_ok=True)
+        results.download(path=f'{fire}/downloaded', session=session)
+        print(f'{fire}: {len(results)}')
+    except Exception as e:
+        print(f'Error with {fire}: {e}')
+        continue
