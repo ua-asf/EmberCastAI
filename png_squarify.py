@@ -60,7 +60,12 @@ def expand_image(image, width):
     # Calculate the new dimensions
     bigger_dimension = max(image.shape[0], image.shape[1])
 
-    new_width = ((bigger_dimension // width) + 1) * width
+    new_width = ((bigger_dimension // width) + 1)
+    
+    if new_width % 2 != 1:
+        new_width += 1
+        
+    new_width *= width
 
     # Expand the image to the new dimensions equally on all 4 sides
     expanded_image = np.zeros((new_width, new_width, 4), dtype=image.dtype)

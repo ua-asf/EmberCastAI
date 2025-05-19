@@ -1,3 +1,4 @@
 /dataset
 *.txt
 .env
+/organized_dataset
