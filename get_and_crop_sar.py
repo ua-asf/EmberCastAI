@@ -1,0 +1,226 @@
+import os
+from dotenv import load_dotenv
+from datetime import datetime, timedelta
+import asf_search as asf
+import numpy as np
+from ship import generate_cropped_geocode_grd
+from geo import crop_and_scale_to_20x20
+
+# Dates used by the dataset are usually in the format YYYYMMDD
+date_format_str = '%Y-%m-%d'
+
+# Fires is a dict of each fire, with each fire being a 
+# list of the files associated with that fire, sorted
+# by date
+fires = dict()
+
+# Grab all fires (they are organized as organized_dataset/<FIRENAME>/<FILES>)
+dirnames = os.listdir('organized_dataset')
+for dirname in dirnames:
+    # Check if the directory is a fire
+    if os.path.isdir(os.path.join('organized_dataset', dirname)):
+        try:
+            # Get all folder in the directory
+            dates = os.listdir(os.path.join('organized_dataset', dirname))
+            # Purge any 'unknown date' folders
+            dates = [date for date in dates if date != 'UnknownDate' and date != 'data']
+            # Sort the files by date
+            dates.sort(key=lambda x: datetime.strptime(x, date_format_str))
+            # Skip any fires with less than 2 days of data
+            if len(dates) < 2:
+                print(f'Skipping {dirname} with {len(dates)} days of data')
+                continue
+            # Add the fire to the fires dict
+            fires[dirname] = [os.path.join('organized_dataset', dirname, file) for file in dates]
+        except Exception as e:
+            print(f'Error with {dirname}: {e}')
+            continue
+
+# Purge any fires not in the fires dict
+for fire in dirnames:
+    if fire not in fires:
+        # Check if the directory is a fire
+        if os.path.isdir(os.path.join('organized_dataset', fire)):
+            # Remove the directory
+            os.system(f'rm -rf organized_dataset/{fire}')
+            print(f'Removed {fire}')
+
+print(f'Found {len(fires)} fires')
+
+# Purge empty fires
+fires = {fire: data for fire, data in fires.items() if len(data) > 0}
+
+print(fires)
+
+# Correct fires such that each pixel is 20m
+
+
+# Find the lat/long extremes for each fire
+
+# Extremes stores the lat/long extremes for each fire
+# in the format (FIRENAME: (LATMIN, LATMAX, LONGMIN, LONGMAX))
+extremes = fires.copy()
+
+for fire_name, data in fires.items():
+    for day in data:
+        for file in os.listdir(day):
+            # Only open the .wkt files
+            if not file.endswith('.wkt'):
+                continue
+
+            lat_max = -90
+            lat_min = 90
+            long_max = -180
+            long_min = 180
+
+            # Parse the lat/long from the file
+            with open(f'{day}/{file}', 'r') as f:
+                # Every line is a polygon
+                for line in f.readlines():
+                    # Remove the 'POLYGON ((' and '))\n' from the line
+                    line = line.removeprefix('POLYGON ((').removesuffix('))\n')
+                    coords = line.split(', ')
+                    for line in coords:
+                        long, lat = line.split(' ')
+                        lat = float(lat)
+                        long = float(long)
+
+                        # Update the extremes if necessary
+                        if lat < lat_min:
+                            lat_min = lat
+                        if lat > lat_max:
+                            lat_max = lat
+                        if long < long_min:
+                            long_min = long
+                        if long > long_max:
+                            long_max = long
+
+                # Update the extremes for the fire
+                extremes[fire_name] = (lat_min, lat_max, long_min, long_max)
+
+# Print the extremes for each fire
+for fire, data in extremes.items():
+    print(f'{fire}: {data}')
+
+total_data = 0
+
+for fire, data in fires.items():
+    data_len = len(data)
+    total_data += data_len
+
+session = asf.ASFSession()
+
+load_dotenv()
+
+# Get user and password credentials
+username = os.getenv('EARTHDATA_USERNAME')
+password = os.getenv('EARTHDATA_PASSWORD')
+
+if username is None or password is None:
+    username = input('Enter your EARTHDATA username: ')
+    password = input('Enter your EARTHDATA password: ')
+
+if username is None or password is None:
+    raise ValueError('Please set the EARTHDATA_USERNAME and EARTHDATA_PASSWORD environment variables')
+
+# Authenticate the session
+session.auth_with_creds(username=username, password=password)
+
+# in the format (FIRENAME: (LATMIN, LATMAX, LONGMIN, LONGMAX))
+# or            (FIRENAME: (s_min,  n_max,  w_min,   e_max))
+for fire, data in extremes.items():
+    path = os.path.join('organized_dataset', fire)
+
+    # Check if the {fire}/data folder exists
+    if not os.path.isdir(path + '/data') or len(os.listdir(path + '/data')) == 0:
+        os.makedirs(path + '/data', exist_ok=True)
+
+        # Get the earliest date for the fire
+
+        date = min(fires[fire], key=lambda x: datetime.strptime(x.split('/')[-1], date_format_str))
+        date = datetime.strptime(date.split('/')[-1], date_format_str)
+
+        print(f'Getting data for {fire} on {day}')
+
+        date_end = date
+
+        try:
+
+            polygon = f'POLYGON(({data[2]:.6} {data[1]:.6}, {data[2]:.6} {data[0]:.6}, {data[3]:.6} {data[0]:.6}, {data[3]:.6} {data[1]:.6}, {data[2]:.6} {data[1]:.6}))'
+
+            print(f'Polygon: {polygon}')
+
+            delta = 36
+
+            date_start = date - timedelta(days=delta)
+
+            options = {
+                'dataset': 'SENTINEL-1',
+                'intersectsWith': polygon,
+                'polarization': ['VV+VH'],
+                'processingLevel': 'GRD_HD',
+                'start': date_start.strftime(date_format_str),
+                'end': date_end.strftime(date_format_str),
+            }
+
+            results = []
+
+            while len(results) == 0:
+                results = asf.geo_search(**options)
+
+                delta += delta
+                options['end'] = options['start']
+                options['start'] = (date - timedelta(days=delta)).strftime(date_format_str)
+
+                if len(results) > 0:
+                    # Sort by date
+                    results.sort(key=lambda x: datetime.strptime(x.properties['stopTime'], '%Y-%m-%dT%H:%M:%S%fZ'))
+                    
+                    # Ensure the polygon is within the bounds of the fire
+                    while results:
+                        # Get the first result
+                        result = results.pop()
+                        candidate = result.geometry['coordinates'][0]
+                        target = polygon.split('((')[1].split('))')[0].split(', ')
+                        # Split the coordinates into lat/long
+                        target = [coord.split(' ') for coord in target]
+                        # Convert the coordinates to floats
+                        target = [[float(coord[0]), float(coord[1])] for coord in target]
+                        
+                        # Check if the coordinates are within the bounds of the fire
+                        # The order goes [0] = top left, [1] = top right, [2] = bottom right, [3] = bottom left
+                        if target[0][0] > candidate[0][0] and target[0][1] < candidate[0][1] and \
+                            target[1][0] > candidate[1][0] and target[1][1] > candidate[1][1] and \
+                            target[2][0] < candidate[2][0] and target[2][1] > candidate[2][1] and \
+                            target[3][0] < candidate[3][0] and target[3][1] < candidate[3][1]:
+                            results = [result]
+                            break
+                        else:
+                            continue
+
+            print(f'{results[0].properties['sceneName']}')
+
+            if not os.path.isdir('tmp'):
+                os.makedirs('tmp')
+
+            if not os.path.isfile(f'tmp/{results[0].properties['sceneName']}.zip'):
+                results[0].download(path='tmp', session=session)
+
+            files = generate_cropped_geocode_grd(results[0].properties['sceneName'], out_dir=f'organized_dataset/{fire}/data')
+
+            print(f'Files: {files}')
+
+            # Perform translation for 20x20 pixel sizes
+            for geotiff in files:
+                crop_and_scale_to_20x20(
+                    input_tiff_path=geotiff[0], 
+                    output_tiff_path=geotiff[0],
+                    nw_latlon=(data[1], data[2]), 
+                    sw_latlon=(data[0], data[2]), 
+                    se_latlon=(data[0], data[3]), 
+                    ne_latlon=(data[1], data[3]), 
+                )
+            
+        except Exception as e:
+            print(f'Error with {fire}: {e}')
+            continue
