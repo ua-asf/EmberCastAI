@@ -2,9 +2,14 @@ import os
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
 import asf_search as asf
-import numpy as np
+import math
 from ship import generate_cropped_geocode_grd
-from geo import crop_and_scale_to_20x20
+from geo import crop_and_scale_to_20x20, haversine_distance
+from shapely.geometry import Polygon
+
+# GDAL configuration
+from osgeo import gdal
+gdal.UseExceptions()
 
 # Dates used by the dataset are usually in the format YYYYMMDD
 date_format_str = '%Y-%m-%d'
@@ -50,7 +55,8 @@ print(f'Found {len(fires)} fires')
 # Purge empty fires
 fires = {fire: data for fire, data in fires.items() if len(data) > 0}
 
-print(fires)
+for fire, data in fires.items():
+    print(f'{fire}: {data}')
 
 # Correct fires such that each pixel is 20m
 
@@ -95,6 +101,32 @@ for fire_name, data in fires.items():
                         if long > long_max:
                             long_max = long
 
+                
+
+                # Scale the extremes to be a multiple of 2000x2000 meters, in a square
+                # Get the distance of latitude and longitude
+                lat_dist = haversine_distance(lat_min, long_min, lat_max, long_min)
+                long_dist = haversine_distance(lat_min, long_min, lat_min, long_max)
+
+                # Get the larger of the two differences
+                width = max(lat_dist, long_dist)
+
+                # Find the nearest multiple of 2000 meters
+                new_width = math.ceil(width / 1000) * 1000
+
+                # Adjust the extremes up and down to fit the new width, back into lat/long
+                # Get the difference between the new width and the old width
+                new_lat_diff = (new_width - lat_dist) / 2
+                new_long_diff = (new_width - long_dist) / 2
+
+                r_earth = 6378000
+
+                # Adjust the extremes up and down to fit the new width, back into lat/long
+                lat_min = lat_min - (new_lat_diff / r_earth) * (180 / math.pi)
+                lat_max = lat_max + (new_lat_diff / r_earth) * (180 / math.pi)
+                long_min = long_min - (new_long_diff / r_earth) * (180 / math.pi)
+                long_max = long_max + (new_long_diff / r_earth) * (180 / math.pi)
+
                 # Update the extremes for the fire
                 extremes[fire_name] = (lat_min, lat_max, long_min, long_max)
 
@@ -137,10 +169,12 @@ for fire, data in extremes.items():
 
         # Get the earliest date for the fire
 
+        print(f'{fire}: {fires[fire]}')
+
         date = min(fires[fire], key=lambda x: datetime.strptime(x.split('/')[-1], date_format_str))
         date = datetime.strptime(date.split('/')[-1], date_format_str)
 
-        print(f'Getting data for {fire} on {day}')
+        print(f'Getting data for {fire} on {date}')
 
         date_end = date
 
@@ -169,8 +203,9 @@ for fire, data in extremes.items():
                 results = asf.geo_search(**options)
 
                 delta += delta
-                options['end'] = options['start']
                 options['start'] = (date - timedelta(days=delta)).strftime(date_format_str)
+
+                print(f'Start: {options["start"]}, End: {options["end"]}')
 
                 if len(results) > 0:
                     # Sort by date
@@ -187,12 +222,13 @@ for fire, data in extremes.items():
                         # Convert the coordinates to floats
                         target = [[float(coord[0]), float(coord[1])] for coord in target]
                         
+                        # Convert the coordinates to a polygon
+                        target_polygon = Polygon(target)
+                        fire_polygon = Polygon([(data[2], data[1]), (data[2], data[0]), (data[3], data[0]), (data[3], data[1])])
+
                         # Check if the coordinates are within the bounds of the fire
                         # The order goes [0] = top left, [1] = top right, [2] = bottom right, [3] = bottom left
-                        if target[0][0] > candidate[0][0] and target[0][1] < candidate[0][1] and \
-                            target[1][0] > candidate[1][0] and target[1][1] > candidate[1][1] and \
-                            target[2][0] < candidate[2][0] and target[2][1] > candidate[2][1] and \
-                            target[3][0] < candidate[3][0] and target[3][1] < candidate[3][1]:
+                        if target_polygon.contains(fire_polygon):
                             results = [result]
                             break
                         else:
