@@ -11,6 +11,7 @@ from xml.etree import ElementTree as ET
 import geopandas as gpd
 from shapely.geometry import Polygon
 import matplotlib.pyplot as plt
+import matplotlib.transforms as transforms
 
 # Define input and output directories
 kmz_dir = 'kmz_data'
