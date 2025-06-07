@@ -1,4 +1,10 @@
-from osgeo import ogr, osr, gdal
+from traceback import print_tb
+from osgeo import gdal, ogr, osr
+from shapely import wkt as shapely_wkt
+from shapely.ops import transform as shapely_transform
+import pyproj
+import os
+import numpy as np
 import math
 
 cutline_shp = '/vsimem/cutline.shp'
@@ -195,3 +201,74 @@ def haversine_distance(lat1, lon1, lat2, lon2):
 
     distance = radius * c
     return distance
+
+def get_utm_epsg(lat, lon):
+    if not (-80 <= lat <= 84):
+        raise ValueError("Latitude out of UTM bounds")
+    zone = int((lon + 180) / 6) + 1
+    if lat >= 0:
+        return 32600 + zone  # Northern hemisphere
+    else:
+        return 32700 + zone  # Southern hemisphere
+
+def draw_wkt_to_geotiff(wkt_strs: list[str], input_file: str, output_file: str, fill_value: int = 255):
+
+    # Open input raster
+    src_ds = gdal.Open(input_file, gdal.GA_ReadOnly)
+    geotransform = src_ds.GetGeoTransform()
+    projection = src_ds.GetProjection()
+    xsize = src_ds.RasterXSize
+    ysize = src_ds.RasterYSize
+
+    wkt_strs = [wkt for wkt in wkt_strs if ogr.CreateGeometryFromWkt(wkt) is not None]
+
+    in_band = src_ds.GetRasterBand(1)
+    data = in_band.ReadAsArray()
+    dtype = in_band.DataType
+
+    # Create output with 2 bands
+    driver = gdal.GetDriverByName("GTiff")
+    out_ds = driver.Create(output_file, xsize, ysize, 2, dtype)
+    out_ds.SetGeoTransform(geotransform)
+    out_ds.SetProjection(projection)
+
+    # Copy original data to band 1
+    out_band1 = out_ds.GetRasterBand(1)
+    out_band1.WriteArray(data)
+
+    # Create mask for WKT shapes
+    mem_driver = gdal.GetDriverByName("MEM")
+    mask_ds = mem_driver.Create("", xsize, ysize, 1, gdal.GDT_Byte)
+    mask_ds.SetGeoTransform(geotransform)
+    mask_ds.SetProjection(projection)
+    mask_band = mask_ds.GetRasterBand(1)
+    mask_band.Fill(fill_value)
+
+    # Prepare layer and geometries
+    srs = osr.SpatialReference()
+    srs.ImportFromEPSG(4326)
+    mem_vector_ds = ogr.GetDriverByName("MEM").CreateDataSource("")
+    mem_layer = mem_vector_ds.CreateLayer("layer", srs=srs, geom_type=ogr.wkbPolygon)
+
+    for wkt in wkt_strs:
+        geom = ogr.CreateGeometryFromWkt(wkt)
+        if geom is None:
+            continue
+        feature = ogr.Feature(mem_layer.GetLayerDefn())
+        feature.SetGeometry(geom)
+        mem_layer.CreateFeature(feature)
+
+    # Rasterize WKT shapes into mask (value = 1)
+    gdal.RasterizeLayer(mask_ds, [1], mem_layer, burn_values=[1], options=["ALL_TOUCHED=TRUE"])
+    mask = mask_band.ReadAsArray()
+
+    # Write WKT mask to second band
+    out_band2 = out_ds.GetRasterBand(2)
+    out_band2.WriteArray(mask)
+
+    # Clean up
+    out_ds.FlushCache()
+    src_ds = None
+    out_ds = None
+
+    print(f"Output saved to: {output_file}")
