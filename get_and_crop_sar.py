@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 import asf_search as asf
 import math
 from ship import generate_cropped_geocode_grd
-from geo import crop_and_scale_to_20x20, haversine_distance
+from geo import crop_and_scale_to_20x20, haversine_distance, draw_wkt_to_geotiff
 from shapely.geometry import Polygon
 
 # GDAL configuration
@@ -81,6 +81,7 @@ for fire_name, data in fires.items():
 
             # Parse the lat/long from the file
             with open(f'{day}/{file}', 'r') as f:
+                print(f'{day}/{file}')
                 # Every line is a polygon
                 for line in f.readlines():
                     # Remove the 'POLYGON ((' and '))\n' from the line
@@ -202,20 +203,27 @@ for fire, data in extremes.items():
             while len(results) == 0:
                 results = asf.geo_search(**options)
 
+                print(f'Found {len(results)} results')
+
                 delta += delta
+                options['end'] = options['start']
                 options['start'] = (date - timedelta(days=delta)).strftime(date_format_str)
+
+                if delta > 1000:
+                    raise ValueError(f'No data found for {fire} on {date}')
 
                 print(f'Start: {options["start"]}, End: {options["end"]}')
 
                 if len(results) > 0:
                     # Sort by date
-                    results.sort(key=lambda x: datetime.strptime(x.properties['stopTime'], '%Y-%m-%dT%H:%M:%S%fZ'))
+                    results.sort(key=lambda x: datetime.strptime(x.properties['stopTime'], '%Y-%m-%dT%H:%M:%S%fZ'))                    
                     
                     # Ensure the polygon is within the bounds of the fire
                     while results:
                         # Get the first result
                         result = results.pop()
                         candidate = result.geometry['coordinates'][0]
+
                         target = polygon.split('((')[1].split('))')[0].split(', ')
                         # Split the coordinates into lat/long
                         target = [coord.split(' ') for coord in target]
@@ -223,12 +231,13 @@ for fire, data in extremes.items():
                         target = [[float(coord[0]), float(coord[1])] for coord in target]
                         
                         # Convert the coordinates to a polygon
-                        target_polygon = Polygon(target)
-                        fire_polygon = Polygon([(data[2], data[1]), (data[2], data[0]), (data[3], data[0]), (data[3], data[1])])
+                        target_polygon = Polygon(candidate)
+                        fire_polygon = Polygon(target)
 
                         # Check if the coordinates are within the bounds of the fire
                         # The order goes [0] = top left, [1] = top right, [2] = bottom right, [3] = bottom left
                         if target_polygon.contains(fire_polygon):
+                            print(f'Found {result.properties['sceneName']}')
                             results = [result]
                             break
                         else:
@@ -260,3 +269,25 @@ for fire, data in extremes.items():
         except Exception as e:
             print(f'Error with {fire}: {e}')
             continue
+
+# Put the WKT fire pixel polygons onto the GeoTIFF
+for fire, data in fires.items():
+    # Get the SAR data files (.tiff)
+    sar_files = [file for file in os.listdir(f'organized_dataset/{fire}/data') if file.endswith('.tiff')]
+
+    for day in data:
+        # Search for the .wkt file for the fire polygon
+        wkt_file = os.listdir(day)
+        wkt_file = [file for file in wkt_file if file.endswith('.wkt')].pop()
+
+        # Open the wkt file
+        with open(f'{day}/{wkt_file}', 'r') as f:
+            polygons = []
+
+            # Every line is a polygon
+            for line in f.readlines():
+                polygons.append(line.strip())
+
+            for tiff in sar_files:
+                input_file = f'organized_dataset/{fire}/data/{tiff}'
+                draw_wkt_to_geotiff(polygons, input_file, output_file=f'{day}/{tiff.split(".")[0]}_wkt.tiff')
