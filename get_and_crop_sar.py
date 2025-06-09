@@ -283,6 +283,9 @@ for fire, data in extremes.items():
             
         except Exception as e:
             print(f'Error with {fire}: {e}')
+            # Remove the fire from the fires dict, extremes, and organized_dataset
+            del fires[fire]
+            shutil.rmtree(f'organized_dataset/{fire}')
             continue
 
 # Merge all geotiffs into a single geotiff
@@ -292,7 +295,7 @@ for fire, data in fires.items():
 
     # Sort such that the vv band is first, then the vh band
     if 'vh' in sar_files[0]:
-        sar_files = sar_files[::-1]
+        sar_files.reverse()
 
     # Append full file path to each file
     sar_files = [os.path.join(f'organized_dataset/{fire}/data', file) for file in sar_files]
