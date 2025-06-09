@@ -6,7 +6,7 @@ from matplotlib import pyplot, patches
 from matplotlib.collections import PatchCollection
 from shapely.geometry import Point
 from cmr import get_scene_metadata
-from geo import geocode_geotiff, create_cutline_shp_file, crop_image, pix_to_lat_lon_basic
+from geo import geocode_geotiff, crop_image, pix_to_lat_lon_basic
 from s3 import download_file
 from cde_data import get_scene_data, get_image_files, get_gdal_data
 from gamma import extract_calibrated_tiff
@@ -38,7 +38,7 @@ def utm_from_lon_lat(lon: float, lat: float) -> int:
     zone = int(lon // 6 + 30) % 60 + 1
     return hemisphere + zone
 
-def generate_cropped_geocode_grd( granule, out_dir=None ):
+def generate_geocoded_grd( granule, out_dir=None ):
 
     print(f"Loading raster data for dataset {granule}")
     print("Querying CMR for scene info")

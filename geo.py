@@ -1,10 +1,4 @@
-from traceback import print_tb
 from osgeo import gdal, ogr, osr
-from shapely import wkt as shapely_wkt
-from shapely.ops import transform as shapely_transform
-import pyproj
-import os
-import numpy as np
 import math
 
 cutline_shp = '/vsimem/cutline.shp'
@@ -45,10 +39,6 @@ def geocode_geotiff(scene, poly, dataset, output_file=None, width=None):
 
     centroid = poly.centroid.coords[0]
     epsg_code = utm_from_lon_lat(centroid[0],centroid[1])
-
-    # if os.path.exists( output_file):
-    #     print(f"Reusing previously geocoded image {output_file}")
-    #     return output_file
 
     params = {  "dstNodata": None, "srcNodata": 0, "format": 'gtiff'}
     if width:
@@ -128,7 +118,7 @@ def crop_and_scale_to_20x20(
     se_latlon,
     sw_latlon,
     pixel_size=20,
-    square_size=100,
+    square_size=50,
 ):
     ds = gdal.Open(input_tiff_path)
     if ds is None:
@@ -156,8 +146,6 @@ def crop_and_scale_to_20x20(
     min_x, max_x = min(x_vals), max(x_vals)
     min_y, max_y = min(y_vals), max(y_vals)
 
-    print(f"min_x: {min_x}, max_x: {max_x}, min_y: {min_y}, max_y: {max_y}")
-
     # Ensure we get a square image - translate to pixels
     min_x_pixel = min_x / pixel_size
     max_x_pixel = max_x / pixel_size
@@ -165,14 +153,21 @@ def crop_and_scale_to_20x20(
     max_y_pixel = max_y / pixel_size
 
     width = max_x_pixel - min_x_pixel
-    width_diff = square_size - (width % square_size)
-    min_x = (min_x_pixel - width_diff / 2) * square_size
-    max_x = (max_x_pixel + width_diff / 2) * square_size
-
     height = max_y_pixel - min_y_pixel
-    height_diff = square_size - (height % square_size)
-    min_y = (min_y_pixel - height_diff / 2) * square_size
-    max_y = (max_y_pixel + height_diff / 2) * square_size
+
+    new_width = max(width, height)
+
+    new_width = math.ceil(new_width / square_size) * square_size
+
+    new_width_diff = (new_width - width) / 2
+
+    min_x = (min_x_pixel - new_width_diff) * pixel_size
+    max_x = (max_x_pixel + new_width_diff) * pixel_size
+
+    new_height_diff = (new_width - height) / 2
+
+    min_y = (min_y_pixel - new_height_diff) * pixel_size
+    max_y = (max_y_pixel + new_height_diff) * pixel_size
 
     # Final warp
     result = gdal.Warp(
@@ -245,9 +240,11 @@ def draw_wkt_to_geotiff(wkt_strs: list[str], input_file: str, output_file: str, 
     data = in_band.ReadAsArray()
     dtype = in_band.DataType
 
-    # Create output with 2 bands
+    # Create output with 1 additional band for the mask
+    bands = src_ds.RasterCount + 1
+
     driver = gdal.GetDriverByName("GTiff")
-    out_ds = driver.Create(output_file, xsize, ysize, 2, dtype)
+    out_ds = driver.Create(output_file, xsize, ysize, bands, dtype)
     out_ds.SetGeoTransform(geotransform)
     out_ds.SetProjection(projection)
 
@@ -291,3 +288,41 @@ def draw_wkt_to_geotiff(wkt_strs: list[str], input_file: str, output_file: str, 
     out_ds = None
 
     print(f"Finalized output saved to: {output_file}")
+
+def merge_geotiffs(geotiffs, output_file):
+    first_ds = gdal.Open(geotiffs[0])
+    if first_ds is None:
+        raise ValueError(f"Could not open {geotiffs[0]}")
+
+    # Get metadata from first image
+    xsize = first_ds.RasterXSize
+    ysize = first_ds.RasterYSize
+    projection = first_ds.GetProjection()
+    geotransform = first_ds.GetGeoTransform()
+    dtype = first_ds.GetRasterBand(1).DataType
+
+    # Create output dataset with n bands
+    driver = gdal.GetDriverByName("GTiff")
+    out_ds = driver.Create(output_file, xsize, ysize, len(geotiffs), dtype)
+    out_ds.SetGeoTransform(geotransform)
+    out_ds.SetProjection(projection)
+
+    # Copy each geotiff to a band in the output
+    for i, geotiff in enumerate(geotiffs, 1):
+        ds = gdal.Open(geotiff)
+        if ds is None:
+            raise ValueError(f"Could not open {geotiff}")
+        
+        # Copy data to output band
+        out_band = out_ds.GetRasterBand(i)
+        data = ds.GetRasterBand(1).ReadAsArray()
+        out_band.WriteArray(data)
+        
+        ds = None
+
+    # Clean up
+    out_ds.FlushCache()
+    first_ds = None
+    out_ds = None
+
+    print(f"Merged {len(geotiffs)} geotiffs into: {output_file}")
