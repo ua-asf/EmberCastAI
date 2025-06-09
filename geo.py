@@ -127,7 +127,8 @@ def crop_and_scale_to_20x20(
     ne_latlon,
     se_latlon,
     sw_latlon,
-    pixel_size=20
+    pixel_size=20,
+    square_size=100,
 ):
     ds = gdal.Open(input_tiff_path)
     if ds is None:
@@ -164,14 +165,14 @@ def crop_and_scale_to_20x20(
     max_y_pixel = max_y / pixel_size
 
     width = max_x_pixel - min_x_pixel
-    width_diff = pixel_size - (width % pixel_size)
-    min_x = (min_x_pixel - width_diff / 2) * pixel_size
-    max_x = (max_x_pixel + width_diff / 2) * pixel_size
+    width_diff = square_size - (width % square_size)
+    min_x = (min_x_pixel - width_diff / 2) * square_size
+    max_x = (max_x_pixel + width_diff / 2) * square_size
 
     height = max_y_pixel - min_y_pixel
-    height_diff = pixel_size - (height % pixel_size)
-    min_y = (min_y_pixel - height_diff / 2) * pixel_size
-    max_y = (max_y_pixel + height_diff / 2) * pixel_size
+    height_diff = square_size - (height % square_size)
+    min_y = (min_y_pixel - height_diff / 2) * square_size
+    max_y = (max_y_pixel + height_diff / 2) * square_size
 
     # Final warp
     result = gdal.Warp(
