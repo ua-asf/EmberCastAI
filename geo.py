@@ -155,6 +155,24 @@ def crop_and_scale_to_20x20(
     min_x, max_x = min(x_vals), max(x_vals)
     min_y, max_y = min(y_vals), max(y_vals)
 
+    print(f"min_x: {min_x}, max_x: {max_x}, min_y: {min_y}, max_y: {max_y}")
+
+    # Ensure we get a square image - translate to pixels
+    min_x_pixel = min_x / pixel_size
+    max_x_pixel = max_x / pixel_size
+    min_y_pixel = min_y / pixel_size
+    max_y_pixel = max_y / pixel_size
+
+    width = max_x_pixel - min_x_pixel
+    width_diff = pixel_size - (width % pixel_size)
+    min_x = (min_x_pixel - width_diff / 2) * pixel_size
+    max_x = (max_x_pixel + width_diff / 2) * pixel_size
+
+    height = max_y_pixel - min_y_pixel
+    height_diff = pixel_size - (height % pixel_size)
+    min_y = (min_y_pixel - height_diff / 2) * pixel_size
+    max_y = (max_y_pixel + height_diff / 2) * pixel_size
+
     # Final warp
     result = gdal.Warp(
         output_tiff_path,
@@ -271,4 +289,4 @@ def draw_wkt_to_geotiff(wkt_strs: list[str], input_file: str, output_file: str, 
     src_ds = None
     out_ds = None
 
-    print(f"Output saved to: {output_file}")
+    print(f"Finalized output saved to: {output_file}")
