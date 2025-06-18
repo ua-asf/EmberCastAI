@@ -1,3 +1,8 @@
+## Dockfile 
+## Instructions:
+## 1. Build the image: docker build -t get-and-crop-sar .
+## 2. Run the container: docker run -it --rm -v ${PWD}/organized_dataset:/EmberCastAI/organized_dataset get-and-crop-sar  
+
 # Use latest GDAL ubuntu image
 FROM ghcr.io/osgeo/gdal:ubuntu-small-latest
 
