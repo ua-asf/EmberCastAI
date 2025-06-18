@@ -13,7 +13,7 @@ tmp/
 .env
 .python-version
 
-# Go modules if not needed in image
+# Go modules 
 go.mod
 go.sum
 webScraper.go

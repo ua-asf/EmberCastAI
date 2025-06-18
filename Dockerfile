@@ -1,6 +1,7 @@
-# Use an official GDAL image as the base image
+# Use latest GDAL ubuntu image
 FROM ghcr.io/osgeo/gdal:ubuntu-small-latest
 
+# Install dependencies
 RUN apt-get update && apt-get install -y \
     python3-pip \
     python3-venv \
@@ -10,6 +11,7 @@ RUN apt-get update && apt-get install -y \
 # Set the working directory in the container
 WORKDIR /EmberCastAI
 
+# Copy the necessary files to the container
 COPY . .
 
 # Install the necessary dependencies
@@ -17,6 +19,8 @@ RUN python3 -m venv /opt/venv && \
     /opt/venv/bin/pip install --upgrade pip && \
     /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
 
+# Get the path for the venv
 ENV PATH="/opt/venv/bin:$PATH"
 
+# Run the script
 CMD ["python", "get_and_crop_sar.py"]
