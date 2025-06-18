@@ -14,7 +14,7 @@ WORKDIR /EmberCastAI
 # Copy the necessary files to the container
 COPY . .
 
-# Install the necessary dependencies
+# Install the necessary Python libraries
 RUN python3 -m venv /opt/venv && \
     /opt/venv/bin/pip install --upgrade pip && \
     /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
