@@ -1,6 +1,6 @@
 """
 Author: Dylan Maltos
-Updated: 5/12/25
+Updated: 5/14/25
 preprocess.py - Preprocesses the dataset by extracting the fire name and date from the filename and organizing the files into folders.
 """
 
@@ -25,8 +25,12 @@ DATE_PATTERNS = [
 
 IGNORED_NAMES = {'AM', 'PM', 'IR', 'Div', 'HeatPerimeter', 'per', 'Complex', 'Photo'}
 
-# Function extract_date - Extract the date from the filename
-def extract_date(filename):
+# Function extract_date_time - Extract the date and time from the filename
+# Returns (date, time) separately
+def extract_date_time(filename):
+    date = None
+    time = None
+    # First, extract date
     for pattern, date_fmt in DATE_PATTERNS:
         match = re.search(pattern, filename, re.IGNORECASE)
         if match:
@@ -37,7 +41,7 @@ def extract_date(filename):
             if date_fmt:
                 try:
                     dt = datetime.strptime(date_str, date_fmt)
-                    return dt.strftime('%Y-%m-%d')
+                    date = dt.strftime('%Y-%m-%d')
                 except Exception:
                     pass
             # Try to parse DD_MMM(AM|PM)
@@ -45,9 +49,26 @@ def extract_date(filename):
             if m:
                 day = m.group(1)
                 month = m.group(2)
-                return f'{month}-{day}'
-            return date_str  # fallback to raw
-    return None
+                date = f'{month}-{day}'
+            if not date and date_str:
+                date = date_str  # fallback to raw
+            break
+    # Now, extract time (look for HHMM or HHMMSS, possibly with PDT/AM/PM)
+    # Only extract time from the part after the date
+    time = None
+    time_match = None
+    if date:
+        # Find the position of the date in the filename
+        idx = filename.find(date_str)
+        after_date = filename[idx+len(date_str):] if idx != -1 else filename
+        time_match = re.search(r'([01]\d|2[0-3])[0-5]\d', after_date)
+    if time_match:
+        time = time_match.group(0)[:4]  # Only HHMM
+    if not date:
+        date = 'UnknownDate'
+    if not time:
+        time = '0000'
+    return date, time
 
 # Function extract_fire_name - Extract the fire name from the filename
 def extract_fire_name(filename):
@@ -94,21 +115,20 @@ for dirpath, dirnames, filenames in os.walk('dataset'):
             # Skip any 'squares' folders
             if 'squares' in os.path.normpath(file).split(os.sep):
                 continue
-            # Extract date
-            date = extract_date(filename)
-            if not date:
-                date = 'UnknownDate'
+            # Extract date and time
+            date, time = extract_date_time(filename)
+            folder_name = f"{date}-{time}"
             # Extract fire name
             fire_name = extract_fire_name(filename)
             if not fire_name:
                 fire_name = 'UnknownFire'
             # Create organized structure
             output_root = os.path.join(os.getcwd(), 'organized_dataset')
-            fire_folder = os.path.join(output_root, fire_name, date)
+            fire_folder = os.path.join(output_root, fire_name, folder_name)
             os.makedirs(fire_folder, exist_ok=True)
             # Compute hash and check for duplicates
             h = file_hash(file)
-            folder_key = (fire_name, date)
+            folder_key = (fire_name, folder_name)
             if folder_key not in folder_hashes:
                 folder_hashes[folder_key] = set()
             if h in folder_hashes[folder_key]:
@@ -117,5 +137,3 @@ for dirpath, dirnames, filenames in os.walk('dataset'):
             # Copy file to organized structure
             dst_path = os.path.join(fire_folder, filename)
             shutil.copy2(file, dst_path)
-
-print("Files organized into folders with robust fire name/date extraction and local deduplication.")

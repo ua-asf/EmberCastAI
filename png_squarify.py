@@ -9,7 +9,7 @@ from datetime import datetime
 from tqdm import tqdm
 
 # Dates used by the dataset are usually in the format YYYYMMDD
-date_format_str = '%Y%m%d'
+date_format_str = '%Y-%m-%d-%H%M'
 
 # Parse /dataset/coordinates folder
 
@@ -18,7 +18,7 @@ date_format_str = '%Y%m%d'
 # by date
 fires = {}
 
-for dirpath, dirnames, filenames in os.walk('dataset/png'):
+for dirpath, dirnames, filenames in os.walk('organized_dataset'):
     for filename in filenames:
         # Search for files with the .png extension
         if filename.endswith('.png'):
