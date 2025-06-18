@@ -21,7 +21,6 @@ def pix_to_lat_lon_basic ( line, pixel, geomatrix, proj ):
     srsLatLong = srs.CloneGeogCS()
     ct = osr.CoordinateTransformation(srs, srsLatLong)
     (lat, lon, _) = ct.TransformPoint(X, Y)
-    log.debug(f'latitude: {lat}\tlongitude: {lon}')
     return (lat, lon,  line, pixel )
 
 
