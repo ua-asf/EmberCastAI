@@ -7,13 +7,14 @@ from ship import generate_geocoded_grd
 from geo import crop_and_scale_to_20x20, haversine_distance, draw_wkt_to_geotiff, merge_geotiffs
 from shapely.geometry import Polygon
 import shutil
+from utils import get_fires
 
 # GDAL configuration
 from osgeo import gdal
 gdal.UseExceptions()
 
 # Dates used by the dataset are usually in the format YYYYMMDD
-date_format_str = '%Y-%m-%d'
+date_format_str = '%Y-%m-%d-%H%M'
 
 # The width/height of the pixels in the SAR data, in meters
 PIXEL_SIZE = 20
@@ -21,41 +22,7 @@ PIXEL_SIZE = 20
 # The width/height of the square in the SAR data, in pixels (as referenced above)
 SQUARE_SIZE = 100
 
-# Fires is a dict of each fire, with each fire being a 
-# list of the files associated with that fire, sorted
-# by date
-fires = dict()
-
-# Grab all fires (they are organized as organized_dataset/<FIRENAME>/<FILES>)
-dirnames = os.listdir('organized_dataset')
-for dirname in dirnames:
-    # Check if the directory is a fire
-    if os.path.isdir(os.path.join('organized_dataset', dirname)):
-        try:
-            # Get all folder in the directory
-            dates = os.listdir(os.path.join('organized_dataset', dirname))
-            # Purge any 'unknown date' folders
-            dates = [date for date in dates if date != 'UnknownDate' and date != 'data']
-            # Sort the files by date
-            dates.sort(key=lambda x: datetime.strptime(x, date_format_str))
-            # Skip any fires with less than 2 days of data
-            if len(dates) < 2:
-                print(f'Skipping {dirname} with {len(dates)} days of data')
-                continue
-            # Add the fire to the fires dict
-            fires[dirname] = [os.path.join('organized_dataset', dirname, file) for file in dates]
-        except Exception as e:
-            print(f'Error with {dirname}: {e}')
-            continue
-
-# Purge any fires not in the fires dict
-for fire in dirnames:
-    if fire not in fires:
-        # Check if the directory is a fire
-        if os.path.isdir(os.path.join('organized_dataset', fire)):
-            # Remove the directory
-            shutil.rmtree(f'organized_dataset/{fire}')
-            print(f'Removed {fire}')
+fires = get_fires()
 
 print(f'Found {len(fires)} fires')
 
