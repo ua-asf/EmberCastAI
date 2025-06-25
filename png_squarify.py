@@ -9,7 +9,7 @@ from datetime import datetime
 from tqdm import tqdm
 
 # Dates used by the dataset are usually in the format YYYYMMDD
-date_format_str = '%Y%m%d'
+date_format_str = '%Y-%m-%d-%H%M'
 
 # Parse /dataset/coordinates folder
 
@@ -18,7 +18,7 @@ date_format_str = '%Y%m%d'
 # by date
 fires = {}
 
-for dirpath, dirnames, filenames in os.walk('dataset/png'):
+for dirpath, dirnames, filenames in os.walk('organized_dataset'):
     for filename in filenames:
         # Search for files with the .png extension
         if filename.endswith('.png'):
@@ -60,7 +60,12 @@ def expand_image(image, width):
     # Calculate the new dimensions
     bigger_dimension = max(image.shape[0], image.shape[1])
 
-    new_width = ((bigger_dimension // width) + 1) * width
+    new_width = ((bigger_dimension // width) + 1)
+    
+    if new_width % 2 != 1:
+        new_width += 1
+        
+    new_width *= width
 
     # Expand the image to the new dimensions equally on all 4 sides
     expanded_image = np.zeros((new_width, new_width, 4), dtype=image.dtype)

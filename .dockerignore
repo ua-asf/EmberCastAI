@@ -1,0 +1,33 @@
+# IDE and editor folders
+.vscode/
+__pycache__/
+
+# Large datasets and intermediate files
+dataset/
+dataset_old/
+organized_dataset_old/
+kmz_data/
+tmp/
+
+# Hidden files and env
+.env
+.python-version
+
+# Go modules 
+go.mod
+go.sum
+webScraper.go
+
+# Unused binaries or misc files
+*.cpp
+*.tif
+*.jpg
+*.png
+*.mp4
+*.zip
+*.tar
+*.gz
+*.log
+
+# Git and other metadata
+.git/

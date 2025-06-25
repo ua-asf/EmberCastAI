@@ -10,7 +10,7 @@ from tensorflow.keras.callbacks import EarlyStopping
 # -----------------------------
 # Configs
 # -----------------------------
-FOLDER_PATH = "dataset/png/calif_n/2021_FEDERAL_Incidents/CA-ENF-024030_Caldor"
+FOLDER_PATH = "organized_dataset/Caldor/"
 IMG_SIZE = (128, 128)
 SEQUENCE_LENGTH = 5
 OUTPUT_PREDICTION = "predicted_perimeter_red_transparent.png"
@@ -126,7 +126,7 @@ def main():
 
     print(f"Saving prediction to {OUTPUT_PREDICTION}")
     red_transparent.save(OUTPUT_PREDICTION)
-    print("✅ Done!")
+    print("Done!")
 
 if __name__ == "__main__":
     main()

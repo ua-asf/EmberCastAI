@@ -11,6 +11,7 @@ from xml.etree import ElementTree as ET
 import geopandas as gpd
 from shapely.geometry import Polygon
 import matplotlib.pyplot as plt
+import matplotlib.transforms as transforms
 
 # Define input and output directories
 kmz_dir = 'kmz_data'
@@ -134,6 +135,12 @@ for current_dir, dirs, files in os.walk(kmz_dir):
             fig, ax = plt.subplots(figsize=(10, 10))
             gdf.plot(ax=ax, facecolor='red', edgecolor='red', linewidth=2)
             ax.set_axis_off()
+
+            # Set axis limits to polygon bounds
+            minx, miny, maxx, maxy = gdf.total_bounds
+            ax.set_xlim(minx, maxx)
+            ax.set_ylim(miny, maxy)
+            ax.set_aspect('equal')
 
             # Save as GeoTIFF
             fig.savefig(geotiff_file, format='tiff', transparent=True, bbox_inches='tight', pad_inches=0)
