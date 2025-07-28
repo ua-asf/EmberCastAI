@@ -8,6 +8,30 @@ from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 from extract_bands import get_all_fires_squares
 import os
+import boto3
+from botocore.exceptions import ClientError
+from dotenv import load_dotenv
+
+# CPU Optimization Settings
+def setup_cpu_optimization():
+    """Configure PyTorch and NumPy to use all available CPU cores"""
+    import os
+    
+    # Get number of CPU cores from SLURM or system
+    num_cores = int(os.environ.get('SLURM_CPUS_PER_TASK', os.cpu_count()))
+    
+    # Set PyTorch to use all available threads
+    torch.set_num_threads(num_cores)
+    
+    # Set NumPy to use all available threads
+    os.environ['OMP_NUM_THREADS'] = str(num_cores)
+    os.environ['MKL_NUM_THREADS'] = str(num_cores)
+    os.environ['NUMEXPR_NUM_THREADS'] = str(num_cores)
+    
+    print(f"Using {num_cores} CPU cores")
+    print(f"PyTorch threads: {torch.get_num_threads()}")
+    
+    return num_cores
 
 class ConvLSTMCell(nn.Module):
     def __init__(self, input_channels, hidden_channels, kernel_size=3, stride=1, padding=1):
@@ -242,12 +266,27 @@ def prepare_data(sequence_length=5, target_length=1, test_size=0.2, random_state
 
 def train_model(train_dataset, test_dataset, input_shape, 
                 hidden_channels=64, num_layers=2, learning_rate=0.001, 
-                num_epochs=50, batch_size=4, device='cpu'):
+                num_epochs=5, batch_size=4, device='cpu', s3_bucket=None):
     """Train the ConvLSTM model"""
     
-    # Create data loaders
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+    # Get number of CPU cores for DataLoader workers
+    num_workers = min(4, int(os.environ.get('SLURM_CPUS_PER_TASK', os.cpu_count())))
+    
+    # Create data loaders with multiple workers
+    train_loader = DataLoader(
+        train_dataset, 
+        batch_size=batch_size, 
+        shuffle=True,
+        num_workers=num_workers,
+        pin_memory=False  # Set to False for CPU-only training
+    )
+    test_loader = DataLoader(
+        test_dataset, 
+        batch_size=batch_size, 
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=False
+    )
     
     # Initialize model
     input_channels = input_shape[1]  # channels dimension
@@ -308,10 +347,30 @@ def train_model(train_dataset, test_dataset, input_shape,
         train_losses.append(avg_train_loss)
         test_losses.append(avg_test_loss)
         
-        if (epoch + 1) % 10 == 0:
-            print(f'Epoch [{epoch+1}/{num_epochs}], '
-                  f'Train Loss: {avg_train_loss:.6f}, '
-                  f'Test Loss: {avg_test_loss:.6f}')
+        print(f'Epoch [{epoch+1}/{num_epochs}], '
+                f'Train Loss: {avg_train_loss:.6f}, '
+                f'Test Loss: {avg_test_loss:.6f}')
+        
+        # Save checkpoint after each epoch
+        checkpoint = {
+            'epoch': epoch + 1,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'train_loss': avg_train_loss,
+            'test_loss': avg_test_loss,
+        }
+        
+        # Create checkpoints directory if it doesn't exist
+        os.makedirs('checkpoints', exist_ok=True)
+        
+        # Save checkpoint in checkpoints folder
+        checkpoint_path = f'checkpoints/fire_predictor_checkpoint_epoch_{epoch+1}.pth'
+        torch.save(checkpoint, checkpoint_path)
+        print(f"Checkpoint saved for epoch {epoch+1} at {checkpoint_path}")
+        
+        # Upload checkpoint to S3 if bucket is specified
+        if s3_bucket:
+            upload_checkpoint_to_s3(checkpoint_path, s3_bucket, epoch + 1)
     
     return model, train_losses, test_losses
 
@@ -327,8 +386,44 @@ def plot_training_history(train_losses, test_losses):
     plt.grid(True)
     plt.show()
 
+def upload_to_s3(file_path, bucket_name, s3_key=None):
+    try:
+        # Initialize S3 client with custom credentials from .env
+        s3_client = boto3.client(
+            's3',
+            aws_access_key_id=os.environ.get('AWS_KEY'),
+            aws_secret_access_key=os.environ.get('AWS_SECRET'),
+            region_name=os.environ.get('AWS_REGION')
+        )
+        
+        # If s3_key is not provided, use the filename
+        if s3_key is None:
+            s3_key = os.path.basename(file_path)
+        
+        # Upload file
+        s3_client.upload_file(file_path, bucket_name, s3_key)
+        print(f"Successfully uploaded {file_path} to s3://{bucket_name}/{s3_key}")
+        return True
+        
+    except ClientError as e:
+        print(f"Error uploading to S3: {e}")
+        return False
+    except Exception as e:
+        print(f"Unexpected error uploading to S3: {e}")
+        return False
+
+def upload_checkpoint_to_s3(checkpoint_path, bucket_name, epoch):
+    s3_key = f"model/checkpoints/fire_predictor_checkpoint_epoch_{epoch}.pth"
+    return upload_to_s3(checkpoint_path, bucket_name, s3_key)
+
 def main():
     """Main function to run the complete pipeline"""
+    
+    # Load environment variables from .env file
+    load_dotenv()
+    
+    # Setup CPU optimization
+    num_cores = setup_cpu_optimization()
     
     # Set device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -354,17 +449,24 @@ def main():
         hidden_channels=64,
         num_layers=2,
         learning_rate=0.001,
-        num_epochs=50,
+        num_epochs=5,
         batch_size=4,
-        device=device
+        device=device,
+        s3_bucket=os.environ.get('S3_BUCKET')  # Get from environment variable
     )
     
     # Plot results
     plot_training_history(train_losses, test_losses)
     
     # Save model
-    torch.save(model.state_dict(), 'fire_predictor_model.pth')
-    print("Model saved as 'fire_predictor_model.pth'")
+    model_path = 'fire_predictor_model.pth'
+    torch.save(model.state_dict(), model_path)
+    print(f"Model saved as '{model_path}'")
+    
+    # Upload final model to S3 if bucket is specified
+    s3_bucket = os.environ.get('S3_BUCKET')
+    if s3_bucket:
+        upload_to_s3(model_path, s3_bucket, 'model/fire_predictor_model.pth')
     
     return model
 

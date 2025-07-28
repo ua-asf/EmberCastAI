@@ -45,16 +45,16 @@ def expand_to_square(array, target_size=None):
     height, width, bands = array.shape
     if target_size is None:
         max_dim = max(height, width)
-        target_size = ((max_dim // 25) + 1) * 25
+        target_size = ((max_dim // 100) + 1) * 100
         if target_size % 2 != 0:
-            target_size += 25
+            target_size += 100
     square_array = np.zeros((target_size, target_size, bands), dtype=array.dtype)
     y_offset = (target_size - height) // 2
     x_offset = (target_size - width) // 2
     square_array[y_offset:y_offset + height, x_offset:x_offset + width] = array
     return square_array
 
-def cut_into_squares(array, square_size=25):
+def cut_into_squares(array, square_size=100):
     height, width, bands = array.shape
     if height % square_size != 0 or width % square_size != 0:
         raise ValueError(f"Array dimensions ({height}, {width}) must be multiples of {square_size}")
@@ -67,7 +67,7 @@ def cut_into_squares(array, square_size=25):
             squares.append(square)
     return squares
 
-def process_fire_data(fire_name, tiff_paths, square_size=25):
+def process_fire_data(fire_name, tiff_paths, square_size=100):
     """Process all merged_wkt.tiff files for a fire and return list of squares as numpy arrays"""
     all_squares = []
     for tiff_path in tiff_paths:
@@ -82,7 +82,7 @@ def process_fire_data(fire_name, tiff_paths, square_size=25):
             continue
     return all_squares
 
-def get_all_fires_squares(square_size=25):
+def get_all_fires_squares(square_size=100):
     """Returns a dictionary: fire_name -> list of squares (numpy arrays)"""
     print("Searching for merged_wkt.tiff files")
     fires = get_fires_with_merged_wkt()
