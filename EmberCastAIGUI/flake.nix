@@ -29,8 +29,11 @@
           python-pkgs.fiona
           python-pkgs.pyproj
           python-pkgs.scikit-image
-        ]);
 
+          # Dev tools (optional)
+          python-pkgs.ipython
+          python-pkgs.black
+        ]);
       in {
         packages.default = pkgs.writeShellApplication {
           name = "embercastaigui";
@@ -43,6 +46,10 @@
         apps.default = flake-utils.lib.mkApp {
           drv = self.packages.${system}.default;
           exePath = "/bin/embercastaigui";
+        };
+
+        devShells.default = pkgs.mkShell {
+          packages = [ python-env ];
         };
       });
 }
