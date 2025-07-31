@@ -10,6 +10,7 @@ pkgs.mkShell {
     openssl
     pkg-config
     webkitgtk_4_1
+    libcanberra-gtk3
     xdotool
     dioxus-cli
   ];
