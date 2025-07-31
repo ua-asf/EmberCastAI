@@ -1,0 +1,39 @@
+[package]
+name = "EmberCastAIGUI"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+chrono = "0.4.41"
+dioxus = "0.6.3"
+tokio = { version = "1.47.0", features = ["full"] }
+
+[features]
+default = ["desktop"]
+web = ["dioxus/web"]
+desktop = ["dioxus/desktop"]
+mobile = ["dioxus/mobile"]
+
+[profile]
+
+[profile.wasm-dev]
+inherits = "dev"
+opt-level = 1
+
+[profile.server-dev]
+inherits = "dev"
+
+[profile.android-dev]
+inherits = "dev"
+
+[profile.release]
+opt-level = 'z'
+lto = true
+strip = true
+debug = false
+panic = "abort"
+
+[profile.release.package.'*']
+opt-level = 'z'
+strip = true
+debug = false

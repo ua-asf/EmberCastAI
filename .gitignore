@@ -3,3 +3,7 @@
 .env
 /organized_dataset
 *.zip
+*target
+.venv
+__pycache__
+EmberCastAIGUI/assets/tmp
