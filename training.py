@@ -460,7 +460,7 @@ def main():
     
     # Save model
     model_path = 'fire_predictor_model.pth'
-    torch.save(model.state_dict(), model_path)
+    torch.save(model, model_path)
     print(f"Model saved as '{model_path}'")
     
     # Upload final model to S3 if bucket is specified
