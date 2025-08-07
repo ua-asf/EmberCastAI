@@ -169,9 +169,9 @@ class FireDataset(Dataset):
                     sequence = squares[i:i + sequence_length]
                     target = squares[i + sequence_length:i + sequence_length + target_length]
                     
-                    # Convert to tensors
-                    sequence_tensor = torch.stack([torch.from_numpy(sq).float() for sq in sequence])
-                    target_tensor = torch.stack([torch.from_numpy(tg).float() for tg in target])
+                    # Convert to tensors and transpose from (H, W, C) to (C, H, W)
+                    sequence_tensor = torch.stack([torch.from_numpy(sq).float().permute(2, 0, 1) for sq in sequence])
+                    target_tensor = torch.stack([torch.from_numpy(tg).float().permute(2, 0, 1) for tg in target])
                     
                     self.sequences.append(sequence_tensor)
                     self.targets.append(target_tensor)
@@ -289,7 +289,7 @@ def train_model(train_dataset, test_dataset, input_shape,
     )
     
     # Initialize model
-    input_channels = input_shape[1]  # channels dimension
+    input_channels = input_shape[1]  # channels dimension (sequence_length, channels, height, width)
     model = FirePredictor(
         input_channels=input_channels,
         hidden_channels=hidden_channels,
