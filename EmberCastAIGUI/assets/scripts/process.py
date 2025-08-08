@@ -6,6 +6,9 @@ import math
 
 sys.path.append('..')
 
+import torch
+from model import FirePredictor, ConvLSTM, ConvLSTMCell
+
 from ship import generate_geocoded_grd
 from geo import crop_and_scale_to_20x20, haversine_distance, draw_wkt_to_geotiff, merge_geotiffs
 from shapely.geometry import Polygon
@@ -15,6 +18,7 @@ date_format_str = '%Y-%m-%dT%H:%M:%S.%f'
 
 # Read terminal inputs
 if len(sys.argv) < 4:
+    print('Usage: python process.py <username> <password> <wkt_string> [date]')
     sys.exit(1)
 
 print(f'{sys.argv}')
@@ -188,8 +192,6 @@ while len(results) == 0:
             else:
                 continue
 
-print(f'{results[0].properties['sceneName']}')
-
 if not os.path.isdir('tmp'):
     os.makedirs('tmp')
 
@@ -201,21 +203,22 @@ files = generate_geocoded_grd(results[0].properties['sceneName'], out_dir=f'{fil
 print(f'Files: {files}')
 
 # Perform translation for 20x20 pixel sizes
-for geotiff in files:
-    crop_and_scale_to_20x20(
-        input_tiff_path=geotiff[0], 
-        output_tiff_path=geotiff[0],
-        nw_latlon=(extremes[1], extremes[2]), 
-        sw_latlon=(extremes[0], extremes[2]), 
-        se_latlon=(extremes[0], extremes[3]), 
-        ne_latlon=(extremes[1], extremes[3]),
-        pixel_size=PIXEL_SIZE,
-        square_size=SQUARE_SIZE,
-    )
+if files:
+    for geotiff in files:
+        crop_and_scale_to_20x20(
+            input_tiff_path=geotiff[0], 
+            output_tiff_path=geotiff[0],
+            nw_latlon=(extremes[1], extremes[2]), 
+            sw_latlon=(extremes[0], extremes[2]), 
+            se_latlon=(extremes[0], extremes[3]), 
+            ne_latlon=(extremes[1], extremes[3]),
+            pixel_size=PIXEL_SIZE,
+            square_size=SQUARE_SIZE,
+        )
 
 # Merge all geotiffs into a single geotiff
 # Get the SAR data files (.tiff)
-sar_files = [file for file in os.listdir(f'{file_path}/data') if file.endswith('.tiff') and file != 'merged.tiff']
+sar_files = [file for file in os.listdir(f'{file_path}/data') if file.endswith('.tiff') and file != 'merged.tiff' and file != 'merged_wkt.tiff']
 
 # Append the file path to each file
 sar_files = [f'{file_path}/data/{file}' for file in sar_files]
@@ -240,9 +243,7 @@ print(f'Finished processing {wkt_string}. Ready for model usage.')
 
 import os
 import numpy as np
-from osgeo import gdal
 from datetime import datetime
-from tqdm import tqdm
 
 # Date format used by the dataset
 date_format_str = '%Y-%m-%d-%H%M'
@@ -253,6 +254,7 @@ def extract_bands_from_tiff(tiff_path):
     if ds is None:
         raise ValueError(f"Could not open {tiff_path}")
     num_bands = ds.RasterCount
+    print(f'Found {num_bands} bands!')
     xsize = ds.RasterXSize
     ysize = ds.RasterYSize
     bands_array = np.zeros((ysize, xsize, num_bands), dtype=np.float32)
@@ -287,31 +289,24 @@ def cut_into_squares(array, square_size=SQUARE_SIZE):
         for j in range(num_squares_x):
             square = array[i * square_size:(i + 1) * square_size, j * square_size:(j + 1) * square_size]
             squares.append(square)
-    return squares
 
-def process_fire_data(fire_name, tiff_paths, square_size=SQUARE_SIZE):
-    """Process all merged_wkt.tiff files for a fire and return list of squares as numpy arrays"""
-    all_squares = []
-    for tiff_path in tiff_paths:
-        try:
-            print(f"Processing {tiff_path}")
-            bands_array = extract_bands_from_tiff(tiff_path)
-            square_array = expand_to_square(bands_array, target_size=None)
-            squares = cut_into_squares(square_array, square_size)
-            all_squares.extend(squares)
-        except Exception as e:
-            print(f"Error processing {tiff_path}: {e}")
-            continue
-    return all_squares
+    return torch.from_numpy(np.array(squares))
 
 bands = extract_bands_from_tiff(f'{file_path}/data/merged_wkt.tiff')
 squares = cut_into_squares(bands, square_size=SQUARE_SIZE)
 
+print(squares.shape)
+print(type(squares))
+
 # Run the model
 
-from model import run_model_on_squares
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-results = run_model_on_squares(squares)
+model = torch.load('assets/model/fire_predictor_model.pth', weights_only = False, map_location=device)
+
+model.eval()  # Set model to evaluation mode
+with torch.no_grad():
+    results = model(squares)
 
 print('Model run complete. Results:', len(results))
 
