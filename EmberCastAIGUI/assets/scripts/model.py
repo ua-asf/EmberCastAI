@@ -1,5 +1,3 @@
-import sys
-sys.path.append('..')
 import numpy as np
 import torch
 import torch.nn as nn
@@ -171,9 +169,9 @@ class FireDataset(Dataset):
                     sequence = squares[i:i + sequence_length]
                     target = squares[i + sequence_length:i + sequence_length + target_length]
                     
-                    # Convert to tensors
-                    sequence_tensor = torch.stack([torch.from_numpy(sq).float() for sq in sequence])
-                    target_tensor = torch.stack([torch.from_numpy(tg).float() for tg in target])
+                    # Convert to tensors and transpose from (H, W, C) to (C, H, W)
+                    sequence_tensor = torch.stack([torch.from_numpy(sq).float().permute(2, 0, 1) for sq in sequence])
+                    target_tensor = torch.stack([torch.from_numpy(tg).float().permute(2, 0, 1) for tg in target])
                     
                     self.sequences.append(sequence_tensor)
                     self.targets.append(target_tensor)
@@ -219,10 +217,7 @@ class FirePredictor(nn.Module):
             padding=0
         )
         
-    def forward(self, x):
-        # x shape: (batch_size, sequence_length, channels, height, width)
-        batch_size, seq_len, channels, height, width = x.size()
-        
+    def forward(self, x):        
         # Pass through ConvLSTM
         lstm_out, _ = self.conv_lstm(x)
         # lstm_out shape: (batch_size, sequence_length, hidden_channels, height, width)
@@ -291,7 +286,7 @@ def train_model(train_dataset, test_dataset, input_shape,
     )
     
     # Initialize model
-    input_channels = input_shape[1]  # channels dimension
+    input_channels = input_shape[1]  # channels dimension (sequence_length, channels, height, width)
     model = FirePredictor(
         input_channels=input_channels,
         hidden_channels=hidden_channels,
@@ -462,7 +457,7 @@ def main():
     
     # Save model
     model_path = 'fire_predictor_model.pth'
-    torch.save(model.state_dict(), model_path)
+    torch.save(model, model_path)
     print(f"Model saved as '{model_path}'")
     
     # Upload final model to S3 if bucket is specified
@@ -471,37 +466,6 @@ def main():
         upload_to_s3(model_path, s3_bucket, 'model/fire_predictor_model.pth')
     
     return model
-
-def run_model_on_squares(squares):
-    """Run the trained model on a list of squares"""
-    load_dotenv()  # Load environment variables from .env file
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Using device: {device}")
-    print(f"shape: {squares[0].shape}")
-    print(f"shape[0] = {squares[0].shape[0]}")
-    print(f"shape[1] = {squares[0].shape[1]}")
-    print(f"shape[2] = {squares[0].shape[2]}")
-    model = FirePredictor(
-        input_channels=squares[0].shape[2],  # Number of channels in the input square
-        hidden_channels=64,
-        num_layers=2,
-        sequence_length=1,  # Single square input
-        target_length=1
-    ).to(device)
-
-    model.load_state_dict(torch.load('assets/model/fire_predictor_model.pth', map_location=device))
-
-    model.eval()  # Set model to evaluation mode
-
-    results = []
-    
-    with torch.no_grad():
-        for square in squares:
-            square_tensor = torch.from_numpy(square).unsqueeze(0).to(device)  # Add batch dimension
-            output = model(square_tensor)
-            results.append(output.cpu().numpy())
-    
-    return results
 
 if __name__ == "__main__":
     model = main()

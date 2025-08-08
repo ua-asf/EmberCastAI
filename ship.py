@@ -50,9 +50,13 @@ def generate_geocoded_grd( granule, out_dir=None ):
 
     subset_product = out_dir or f'/tmp/{granule}'
     
-    # if os.path.exists(subset_product):
-    #     print(f"Reusing previously subsetted product {subset_product}")
-    #     return
+    print(f'{subset_product}/{granule}')
+    
+    if os.path.exists(subset_product):
+        for file in os.listdir(subset_product):
+            if file.endswith('.tiff'):
+                print(f"Reusing previously subsetted product {file}")
+                return
 
     print(f"Local fetching {granule} dataset")
     local_measure_path, zip_file = get_scene_data(granule)
