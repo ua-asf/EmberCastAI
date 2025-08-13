@@ -1,6 +1,9 @@
 #![allow(non_snake_case)]
 
-use dioxus::{document::Title, prelude::*};
+use dioxus::{
+    document::{Style, Title},
+    prelude::*,
+};
 use tokio::process::Command;
 
 fn main() {
@@ -18,11 +21,24 @@ pub static THROBBER: Asset = asset!("assets/throbber.gif");
 pub fn App() -> Element {
     rsx! {
         Title { "EmberCast AI" }
+        // Stylesheet
+        // Black background with white text
+        Style {
+            "body {{
+                background-color: #020202;
+                color: #FEFEFE;
+                margin: 0;
+             }}"
+        }
         div { style: "text-align: center;
             height: 100%;
             display: grid;
             gap: 20px;
-            grid-template-columns: auto 5px 1fr;",
+            grid-template-columns: auto 5px 1fr;
+            height: 100%;
+            flex: 1,
+            margin: 0px 0px;
+            height: 100vh;",
             UIinputs {}
             Separator {}
             RenderImage {}
@@ -68,7 +84,8 @@ fn UIinputs() -> Element {
             }
 
             div { style: "margin-top: 20px; display: flex; justify-content: center;",
-                button { style: "width: 100%; max-width: 200px; padding: 5px; font-size: 16px;",
+                button {
+                    style: "width: 100%; max-width: 200px; padding: 5px; font-size: 16px;",
                     onclick: move |_| {
                         button_clickable.set(false);
                         let date_format_str = "%Y-%m-%dT%H:%M:%S.%3f";
@@ -76,8 +93,6 @@ fn UIinputs() -> Element {
                             .format(date_format_str)
                             .to_string();
                         println!("Formatted date: {}", formatted_date);
-                        // Add a placeholder for the output file - this will be
-                        // replaced once the model runs successfully.
                         OUTPUT_FILES.write().push(THROBBER.to_string());
                         spawn(async move {
                             run_model(
@@ -105,7 +120,7 @@ fn UIinputs() -> Element {
 #[component]
 fn Separator() -> Element {
     rsx! {
-        div { style: "width: 100%; height: 100%; background-color: #000;" }
+        div { style: "width: 100%; height: 100%; background-color: #FFF;" }
     }
 }
 
