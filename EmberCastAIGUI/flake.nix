@@ -28,7 +28,9 @@
           python-pkgs.boto3
           python-pkgs.fiona
           python-pkgs.pyproj
+          python-pkgs.scikit-learn
           python-pkgs.scikit-image
+          python-pkgs.joblib
 
           # Dev tools (optional)
           python-pkgs.ipython

@@ -7,7 +7,6 @@ import math
 sys.path.append('..')
 
 import torch
-from model import FirePredictor, ConvLSTM, ConvLSTMCell
 
 from ship import generate_geocoded_grd
 from geo import crop_and_scale_to_20x20, haversine_distance, draw_wkt_to_geotiff, merge_geotiffs
@@ -298,15 +297,17 @@ squares = cut_into_squares(bands, square_size=SQUARE_SIZE)
 print(squares.shape)
 print(type(squares))
 
+results = []
+
 # Run the model
+import joblib
+from sklearn.ensemble import RandomForestRegressor
+model = joblib.load(f'{os.getcwd()}/assets/model/fire_prediction_random_forest.pkl')['model']
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+print(model)
 
-model = torch.load('assets/model/fire_predictor_model.pth', weights_only = False, map_location=device)
-
-model.eval()  # Set model to evaluation mode
-with torch.no_grad():
-    results = model(squares)
+for square in squares:
+    results.append(model.predict(square))
 
 print('Model run complete. Results:', len(results))
 
