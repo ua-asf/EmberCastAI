@@ -15,7 +15,7 @@ pub static PASSWORD: GlobalSignal<Option<String>> = GlobalSignal::new(|| None);
 pub static WKT_STRING: GlobalSignal<Option<String>> = GlobalSignal::new(|| None);
 pub static OUTPUT_FILES: GlobalSignal<Vec<String>> = GlobalSignal::new(Vec::new);
 
-pub static THROBBER: Asset = asset!("assets/throbber.gif");
+pub static THROBBER: Asset = asset!("assets/throbber.svg");
 
 #[component]
 pub fn App() -> Element {
@@ -48,6 +48,9 @@ pub fn App() -> Element {
 
 #[component]
 fn UIinputs() -> Element {
+    let mut username_error = use_signal(|| false);
+    let mut password_error = use_signal(|| false);
+    let mut wkt_string_error = use_signal(|| false);
     let mut button_clickable = use_signal(|| true);
 
     rsx! {
@@ -55,8 +58,10 @@ fn UIinputs() -> Element {
             div {
                 p { "Earthdata Username:" }
                 input {
+                    style: format!("border-radius: 5px; border-color: {}", if username_error() { "red" } else { "white" }),
                     oninput: move |e| {
                         *USERNAME.write() = Some(e.value().clone());
+                        username_error.set(false);
                     },
                     value: USERNAME(),
                 }
@@ -65,9 +70,11 @@ fn UIinputs() -> Element {
             div {
                 p { "Earthdata Password:" }
                 input {
+                    style: format!("border-radius: 5px; border-color: {}", if password_error() { "red" } else { "white" }),
                     r#type: "password",
                     oninput: move |e| {
                         *PASSWORD.write() = Some(e.value().clone());
+                        password_error.set(false);
                     },
                     value: PASSWORD(),
                 }
@@ -76,8 +83,10 @@ fn UIinputs() -> Element {
             div {
                 p { "WKT String:" }
                 input {
+                    style: format!("border-radius: 5px; border-color: {}", if wkt_string_error() { "red" } else { "white" }),
                     oninput: move |e| {
                         *WKT_STRING.write() = Some(e.value().clone());
+                        wkt_string_error.set(false);
                     },
                     value: WKT_STRING(),
                 }
@@ -87,6 +96,22 @@ fn UIinputs() -> Element {
                 button {
                     style: "width: 100%; max-width: 200px; padding: 5px; font-size: 16px;",
                     onclick: move |_| {
+                        let mut errors = false;
+                        if !USERNAME.read().clone().is_some_and(|v| !v.is_empty()) {
+                            username_error.set(true);
+                            errors = true;
+                        }
+                        if !PASSWORD.read().clone().is_some_and(|v| !v.is_empty()) {
+                            password_error.set(true);
+                            errors = true;
+                        }
+                        if !WKT_STRING.read().clone().is_some_and(|v| !v.is_empty()) {
+                            wkt_string_error.set(true);
+                            errors = true;
+                        }
+                        if errors {
+                            return;
+                        }
                         button_clickable.set(false);
                         let date_format_str = "%Y-%m-%dT%H:%M:%S.%3f";
                         let formatted_date: String = chrono::Local::now()
@@ -169,11 +194,21 @@ fn RenderImage() -> Element {
 
             // Render the selected image if any are available
             if !output_files.is_empty() {
+                if output_files[index()].ends_with("svg") {
+                    img { style: "padding-top: 30px; padding-bottom: 10px;",
+                        fill: "#fff",
+                        width: "200",
+                        height: "200",
+                        src: output_files[index()].clone(),
+                    }
+                    p { "Processing..." }
+                } else {
                 // Display the current image
-                img {
-                    src: output_files[index()].clone(),
-                    alt: "Processed Image",
-                    style: "width: 100%; height: auto; object-fit: contain; padding: 10px; border: 1px solid #000;",
+                    img {
+                        src: output_files[index()].clone(),
+                        alt: "Processed Image",
+                        style: "width: 100%; height: auto; object-fit: contain; padding: 10px; border: 1px solid #000;",
+                    }
                 }
             } else {
                 p { "No image available." }
