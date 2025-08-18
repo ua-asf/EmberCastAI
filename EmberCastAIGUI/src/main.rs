@@ -203,7 +203,7 @@ fn RenderImage() -> Element {
                     }
                     p { "Processing..." }
                 } else {
-                // Display the current image
+                    // Display the current image
                     img {
                         src: output_files[index()].clone(),
                         alt: "Processed Image",

@@ -252,15 +252,21 @@ def extract_bands_from_tiff(tiff_path):
     ds = gdal.Open(tiff_path)
     if ds is None:
         raise ValueError(f"Could not open {tiff_path}")
+    
     num_bands = ds.RasterCount
     print(f'Found {num_bands} bands!')
+    
     xsize = ds.RasterXSize
     ysize = ds.RasterYSize
-    bands_array = np.zeros((ysize, xsize, num_bands), dtype=np.float32)
+    
+    # Option 1: Direct CHW allocation (most memory efficient)
+    bands_array = np.zeros((num_bands, ysize, xsize), dtype=np.float32)
+    
     for band_idx in range(num_bands):
         band = ds.GetRasterBand(band_idx + 1)
-        data = band.ReadAsArray()
-        bands_array[:, :, band_idx] = data
+        bands_array[band_idx] = band.ReadAsArray()
+        print(f'Wrote {band_idx+1} into output')
+    
     ds = None
     return bands_array
 
@@ -278,18 +284,24 @@ def expand_to_square(array, target_size=None):
     return square_array
 
 def cut_into_squares(array, square_size=SQUARE_SIZE):
-    height, width, bands = array.shape
+    channels, height, width = array.shape
+    
     if height % square_size != 0 or width % square_size != 0:
         raise ValueError(f"Array dimensions ({height}, {width}) must be multiples of {square_size}")
+    
     num_squares_y = height // square_size
     num_squares_x = width // square_size
+    
     squares = []
     for i in range(num_squares_y):
         for j in range(num_squares_x):
-            square = array[i * square_size:(i + 1) * square_size, j * square_size:(j + 1) * square_size]
+            # Extract square preserving all channels
+            square = array[:, i * square_size:(i + 1) * square_size, j * square_size:(j + 1) * square_size]
             squares.append(square)
 
-    return torch.from_numpy(np.array(squares))
+    # Add batch dimension: (num_patches, channels, H, W) -> (num_patches, 1, channels, H, W)
+    return torch.from_numpy(np.array(squares)).unsqueeze(1)
+
 
 bands = extract_bands_from_tiff(f'{file_path}/data/merged_wkt.tiff')
 squares = cut_into_squares(bands, square_size=SQUARE_SIZE)
@@ -300,14 +312,17 @@ print(type(squares))
 results = []
 
 # Run the model
-import joblib
-from sklearn.ensemble import RandomForestRegressor
-model = joblib.load(f'{os.getcwd()}/assets/model/fire_prediction_random_forest.pkl')['model']
+import torch
+from model import SimpleFireCNN
 
+model = SimpleFireCNN()
+model.load_state_dict(torch.load(f'{os.getcwd()}/assets/model/simple_fire_cnn.pth'))
 print(model)
+model.eval()
 
-for square in squares:
-    results.append(model.predict(square))
+with torch.no_grad():
+    for square in squares:
+        results.append(model(square).numpy())
 
 print('Model run complete. Results:', len(results))
 
@@ -321,20 +336,23 @@ def stitch_results(squares, square_size=SQUARE_SIZE):
     
     # Calculate dimensions
     num_rows = int(np.sqrt(num_squares))
-    num_cols = (num_squares + num_rows - 1) // num_rows  # Ceiling division
+    num_cols = (num_squares + num_rows - 1) // num_rows
     stitched_height = num_rows * square_size
     stitched_width = num_cols * square_size
     
-    stitched_array = np.zeros((stitched_height, stitched_width, squares[0].shape[2]), dtype=squares[0].dtype)
+    stitched_array = np.zeros((stitched_height, stitched_width), dtype=squares[0].dtype)
     
+    print(squares[0].squeeze()[0:100, 0:100])
+
     for idx, square in enumerate(squares):
         row = idx // num_cols
         col = idx % num_cols
         y_offset = row * square_size
         x_offset = col * square_size
-        stitched_array[y_offset:y_offset + square_size, x_offset:x_offset + square_size] = square
+        stitched_array[y_offset:y_offset + square_size, x_offset:x_offset + square_size] = square.squeeze() * 255
     
-    return stitched_array
+    print(stitched_array[0:10, 0:10])
+    return stitched_array.astype(np.uint8)
 
 print('Stitching results back together...')
 stitched_results = stitch_results(results)
@@ -345,28 +363,13 @@ output_dir = f'assets/tmp/{date}'
 if not os.path.exists(output_dir):
     os.makedirs(output_dir)
 
-output_file = os.path.join(output_dir, f'results.png')
-driver = gdal.GetDriverByName('GTiff')
-out_ds = driver.Create(output_file, stitched_results.shape[1], stitched_results.shape[0], stitched_results.shape[2], gdal.GDT_Float32)
-if out_ds is None:
-    raise ValueError(f"Could not create output file {output_file}")
-
 # Turn the stitched results into a png
 from PIL import Image
 def save_as_png(array, output_path):
     """Save a numpy array as a PNG image"""
-    if array.ndim == 3 and array.shape[2] == 1:
-        # Single band, convert to grayscale
-        array = array[:, :, 0]
-    elif array.ndim == 3:
-        # Multi-band, convert to RGB
-        array = np.clip(array, 0, 255).astype(np.uint8)
-    else:
-        raise ValueError("Array must be 2D or 3D with shape (height, width) or (height, width, bands)")
-    
     img = Image.fromarray(array)
     img.save(output_path)
 
-print(f'Saving stitched results to {output_file}')
+print(f'Saving stitched results to assets/tmp/{date}/output.png')
 # Data should always be 3 bands, so we can save it as RGB
 save_as_png(stitched_results, f'assets/tmp/{date}/output.png')
