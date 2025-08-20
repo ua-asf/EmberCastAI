@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
 use dioxus::{
-    document::{Style, Title},
+    document::{Link, Style, Title},
     prelude::*,
 };
 use tokio::process::Command;
@@ -16,6 +16,7 @@ pub static WKT_STRING: GlobalSignal<Option<String>> = GlobalSignal::new(|| None)
 pub static OUTPUT_FILES: GlobalSignal<Vec<String>> = GlobalSignal::new(Vec::new);
 
 pub static THROBBER: Asset = asset!("assets/throbber.svg");
+pub static FONT: Asset = asset!("assets/fonts/pixelify_sans/PixelifySans-Regular.ttf");
 
 #[component]
 pub fn App() -> Element {
@@ -24,11 +25,26 @@ pub fn App() -> Element {
         // Stylesheet
         // Black background with white text
         Style {
-            "body {{
+            r#"@font-face {{
+                font-family: 'Pixel';
+                src: url('assets/fonts/pixeloid/PixeloidSans-mLxMm.ttf') format('truetype');
+                font-weight: 400;
+                font-display: swap;
+                font-style: normal;
+            }}
+
+            body {{
                 background-color: #020202;
                 color: #FEFEFE;
                 margin: 0;
-             }}"
+                font-family: 'Pixel';
+                font-size: 16px;
+             }}
+
+            button {{
+                font-family: 'Pixel';
+                font-size: 18px;
+            }}"#
         }
         div { style: "text-align: center;
             height: 100%;
@@ -56,7 +72,7 @@ fn UIinputs() -> Element {
     rsx! {
         div { style: "padding: 20px;",
             div {
-                p { "Earthdata Username:" }
+                p { "Earthdata Username" }
                 input {
                     style: format!("border-radius: 5px; border-color: {}", if username_error() { "red" } else { "white" }),
                     oninput: move |e| {
@@ -68,7 +84,7 @@ fn UIinputs() -> Element {
             }
 
             div {
-                p { "Earthdata Password:" }
+                p { "Earthdata Password" }
                 input {
                     style: format!("border-radius: 5px; border-color: {}", if password_error() { "red" } else { "white" }),
                     r#type: "password",
@@ -81,7 +97,7 @@ fn UIinputs() -> Element {
             }
 
             div {
-                p { "WKT String:" }
+                p { "WKT String" }
                 input {
                     style: format!("border-radius: 5px; border-color: {}", if wkt_string_error() { "red" } else { "white" }),
                     oninput: move |e| {
@@ -94,7 +110,7 @@ fn UIinputs() -> Element {
 
             div { style: "margin-top: 20px; display: flex; justify-content: center;",
                 button {
-                    style: "width: 100%; max-width: 200px; padding: 5px; font-size: 16px;",
+                    style: "width: 100%; padding: 5px;",
                     onclick: move |_| {
                         let mut errors = false;
                         if !USERNAME.read().clone().is_some_and(|v| !v.is_empty()) {
@@ -158,7 +174,7 @@ fn RenderImage() -> Element {
     rsx! {
         div { style: "padding: 20px;",
             // Image navigation buttons
-            div { style: "display: flex; justify-content: center; gap: 10px;",
+            div { style: "display: flex; justify-content: center; align-items: center; gap: 10px;",
                 // Previous/Decrement button
                 button {
                     disabled: index() == 0,
@@ -200,7 +216,7 @@ fn RenderImage() -> Element {
                         height: "200",
                         src: output_files[index()].clone(),
                     }
-                    p { "Processing..." }
+                    p { style: "font-size: 24px;", "Processing..." }
                 } else {
                     // Display the current image
                     img {
@@ -210,7 +226,7 @@ fn RenderImage() -> Element {
                     }
                 }
             } else {
-                p { "No image available." }
+                p { style: "font-size: 24px;", "No image available" }
             }
         }
     }
