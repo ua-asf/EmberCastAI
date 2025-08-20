@@ -118,8 +118,8 @@ session.auth_with_creds(username=username, password=password)
 # in the format (FIRENAME: (LATMIN, LATMAX, LONGMIN, LONGMAX))
 # or            (FIRENAME: (s_min,  n_max,  w_min,   e_max))
 
-date = sys.argv[4]
-date = datetime.strptime(os.path.basename(date), date_format_str)
+date_str = sys.argv[4]
+date = datetime.strptime(os.path.basename(date_str), date_format_str)
 
 # Create assets/tmp/{wkt_string}/data directory if it doesn't exist
 if not os.path.isdir(f'{file_path}/data'):
@@ -359,7 +359,7 @@ stitched_results = stitch_results(results)
 
 print(f'Stitched results shape: {stitched_results.shape}')
 # Save the stitched results
-output_dir = f'assets/tmp/{date}'
+output_dir = f'{os.getcwd()}/assets/tmp/{date_str}'
 if not os.path.exists(output_dir):
     os.makedirs(output_dir)
 
@@ -370,6 +370,6 @@ def save_as_png(array, output_path):
     img = Image.fromarray(array)
     img.save(output_path)
 
-print(f'Saving stitched results to assets/tmp/{date}/output.png')
+print(f'Saving stitched results to {output_dir}/output.png')
 # Data should always be 3 bands, so we can save it as RGB
-save_as_png(stitched_results, f'assets/tmp/{date}/output.png')
+save_as_png(stitched_results, f'{output_dir}/output.png')
