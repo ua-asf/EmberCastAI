@@ -54,7 +54,9 @@ pub fn App() -> Element {
             height: 100%;
             flex: 1,
             margin: 0px 0px;
-            height: 100vh;",
+            height: 100vh;
+            display: flex;
+            align-items: center;",
             UIinputs {}
             Separator {}
             RenderImage {}
@@ -70,7 +72,7 @@ fn UIinputs() -> Element {
     let mut button_clickable = use_signal(|| true);
 
     rsx! {
-        div { style: "padding: 20px;",
+        div { style: "display: flex; flex-direction: column; flex: 0 1 auto; justify-content: center; padding: 20px; min-height: 50%; max-height: 80%",
             div {
                 p { "Earthdata Username" }
                 input {
@@ -160,7 +162,7 @@ fn UIinputs() -> Element {
 #[component]
 fn Separator() -> Element {
     rsx! {
-        div { style: "width: 100%; height: 100%; background-color: #FFF;" }
+        div { style: "width: 8px; height: 100%; background-color: #FFF;" }
     }
 }
 
@@ -172,7 +174,7 @@ fn RenderImage() -> Element {
     let mut index: Signal<usize> = use_signal(|| 0);
 
     rsx! {
-        div { style: "padding: 20px;",
+        div { style: "padding: 20px; align-self: start; flex: 1 0 auto;",
             // Image navigation buttons
             div { style: "display: flex; justify-content: center; align-items: center; gap: 10px;",
                 // Previous/Decrement button
