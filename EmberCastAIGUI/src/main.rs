@@ -16,7 +16,6 @@ pub static WKT_STRING: GlobalSignal<Option<String>> = GlobalSignal::new(|| None)
 pub static OUTPUT_FILES: GlobalSignal<Vec<String>> = GlobalSignal::new(Vec::new);
 
 pub static THROBBER: Asset = asset!("assets/throbber.svg");
-pub static FONT: Asset = asset!("assets/fonts/pixelify_sans/PixelifySans-Regular.ttf");
 
 #[component]
 pub fn App() -> Element {
@@ -44,6 +43,7 @@ pub fn App() -> Element {
             button {{
                 font-family: 'Pixel';
                 font-size: 18px;
+                border-radius: 0px;
             }}"#
         }
         div { style: "text-align: center;
@@ -74,7 +74,7 @@ fn UIinputs() -> Element {
             div {
                 p { "Earthdata Username" }
                 input {
-                    style: format!("border-radius: 5px; border-color: {}", if username_error() { "red" } else { "white" }),
+                    style: format!("border-color: {}", if username_error() { "red" } else { "white" }),
                     oninput: move |e| {
                         *USERNAME.write() = Some(e.value().clone());
                         username_error.set(false);
@@ -86,7 +86,7 @@ fn UIinputs() -> Element {
             div {
                 p { "Earthdata Password" }
                 input {
-                    style: format!("border-radius: 5px; border-color: {}", if password_error() { "red" } else { "white" }),
+                    style: format!("border-color: {}", if password_error() { "red" } else { "white" }),
                     r#type: "password",
                     oninput: move |e| {
                         *PASSWORD.write() = Some(e.value().clone());
@@ -99,7 +99,7 @@ fn UIinputs() -> Element {
             div {
                 p { "WKT String" }
                 input {
-                    style: format!("border-radius: 5px; border-color: {}", if wkt_string_error() { "red" } else { "white" }),
+                    style: format!("border-color: {}", if wkt_string_error() { "red" } else { "white" }),
                     oninput: move |e| {
                         *WKT_STRING.write() = Some(e.value().clone());
                         wkt_string_error.set(false);
