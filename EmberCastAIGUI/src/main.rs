@@ -121,12 +121,11 @@ fn UIinputs() -> Element {
                         OUTPUT_FILES.write().push(THROBBER.to_string());
                         spawn(async move {
                             run_model(
-                                    &USERNAME().unwrap_or_default(),
-                                    &PASSWORD().unwrap_or_default(),
-                                    &WKT_STRING().unwrap_or_default(),
-                                    &formatted_date,
-                                )
-                                .await;
+                                &USERNAME().unwrap_or_default(),
+                                &PASSWORD().unwrap_or_default(),
+                                &WKT_STRING().unwrap_or_default(),
+                                &formatted_date,
+                            ).await;
                             button_clickable.set(true);
                         });
                     },
@@ -205,7 +204,7 @@ fn RenderImage() -> Element {
                 } else {
                     // Display the current image
                     img {
-                        src: output_files[index()].clone(),
+                        src: load_image_from_file(output_files[index()].clone()),
                         alt: "Processed Image",
                         style: "width: 100%; height: auto; object-fit: contain; padding: 10px; border: 1px solid #000;",
                     }
@@ -215,6 +214,14 @@ fn RenderImage() -> Element {
             }
         }
     }
+}
+
+fn load_image_from_file(path: String) -> String {
+    let file_content = std::fs::read(path).expect("Failed to read image file");
+
+    let encoded_image = base64::encode(file_content);
+
+    format!("data:image/png;base64,{}", encoded_image)
 }
 
 /// Runs the model using the provided parameters.
@@ -230,7 +237,7 @@ fn RenderImage() -> Element {
 /// This function does not return a value. It spawns a process and waits for it to finish.
 /// The output file path is stored in the `OUTPUT_FILE` global signal.
 async fn run_model(username: &str, password: &str, wkt_string: &str, date: &str) {
-    let status = Command::new("nix")
+    let output = Command::new("nix")
         .arg("run")
         .arg(".")
         .arg("--")
@@ -238,18 +245,26 @@ async fn run_model(username: &str, password: &str, wkt_string: &str, date: &str)
         .arg(password)
         .arg(format!("\"{wkt_string}\""))
         .arg(date)
-        .status()
+        .output()
         .await
         .expect("Failed to start child process");
 
-    println!("Nix run finished with status: {}", status);
+    // Write output to log file
+    let file_path = format!("assets/tmp/{}/log.txt", date);
+    std::fs::create_dir_all(format!("assets/tmp/{}", date)).expect("Failed to create directory");
+    std::fs::write(&file_path, std::str::from_utf8(&*output.stdout).unwrap())
+        .expect("Failed to write log file");
+    std::fs::write(
+        format!("assets/tmp/{}/error.txt", date),
+        std::str::from_utf8(&*output.stderr).unwrap(),
+    )
+    .expect("Failed to write error file");
 
-    if !status.success() {
-        // Remove the last output file placeholder
-        std::mem::drop(OUTPUT_FILES.write().pop());
-        return;
-    }
+    // Drop trhobber
+    std::mem::drop(OUTPUT_FILES.write().pop());
 
     // Look for file in assets/tmp/{date}/output.png
-    OUTPUT_FILES.write()[OUTPUT_FILES.len() - 1] = format!("assets/tmp/{}/output.png", date);
+    OUTPUT_FILES
+        .write()
+        .push(format!("assets/tmp/{}/output.png", date));
 }

@@ -41,7 +41,7 @@
           name = "embercastaigui";
           runtimeInputs = [ python-env ];
           text = ''
-            exec ${python-env}/bin/python3 ${./assets/scripts/process.py} "$@"
+            exec ${python-env}/bin/python3 assets/scripts/process.py "$@"
           '';
         };
 
