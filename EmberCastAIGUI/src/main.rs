@@ -148,7 +148,7 @@ fn UIinputs() -> Element {
                         println!("Formatted date: {}", formatted_date);
 
                         if !OUTPUT_FILES.read().is_empty() {
-                            *INDEX.write() = OUTPUT_FILES.read().len() - 1;
+                            *INDEX.write() = OUTPUT_FILES.read().len();
                         }
 
                         OUTPUT_FILES.write().push(THROBBER.to_string());
