@@ -29,6 +29,20 @@ password = sys.argv[2]
 # Get the WKT fire string from the inputs
 wkt_string = sys.argv[3]
 
+date_str = sys.argv[4]
+
+output_dir = f'{os.getcwd()}/assets/tmp/{date_str}'
+
+# Function to write status to a shared file
+def write_status(message):
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    with open(f'{output_dir}/status.txt', 'w') as f:
+        f.write(message)
+
+
+write_status(f'Starting processing for WKT...')
+
 # Create a hash for the WKT string to use as a directory name
 import hashlib
 hash = hashlib.sha256(wkt_string.encode()).hexdigest()
@@ -118,8 +132,9 @@ session.auth_with_creds(username=username, password=password)
 # in the format (FIRENAME: (LATMIN, LATMAX, LONGMIN, LONGMAX))
 # or            (FIRENAME: (s_min,  n_max,  w_min,   e_max))
 
-date_str = sys.argv[4]
 date = datetime.strptime(os.path.basename(date_str), date_format_str)
+
+write_status('Searching for relevant Sentinel-1 data...')
 
 # Create assets/tmp/{wkt_string}/data directory if it doesn't exist
 if not os.path.isdir(f'{file_path}/data'):
@@ -128,8 +143,6 @@ if not os.path.isdir(f'{file_path}/data'):
 date_end = date
 
 polygon = f'POLYGON(({extremes[2]:.8} {extremes[1]:.8}, {extremes[2]:.8} {extremes[0]:.8}, {extremes[3]:.8} {extremes[0]:.8}, {extremes[3]:.8} {extremes[1]:.8}, {extremes[2]:.8} {extremes[1]:.8}))'
-
-print(f'Polygon: {polygon}')
 
 delta = 36
 
@@ -191,15 +204,19 @@ while len(results) == 0:
             else:
                 continue
 
+write_status('Found Sentinel-1 data. Downloading...')
+
 if not os.path.isdir('tmp'):
     os.makedirs('tmp')
 
 if not os.path.isfile(f'tmp/{results[0].properties['sceneName']}.zip'):
     results[0].download(path='tmp', session=session)
 
+write_status('Download complete. Generating geocoded GRDs...')
+
 files = generate_geocoded_grd(results[0].properties['sceneName'], out_dir=f'{file_path}/data')
 
-print(f'Files: {files}')
+write_status(f'Geocoded GRD generated. Cropping and scaling data to 20x20 meter resolution...')
 
 # Perform translation for 20x20 pixel sizes
 if files:
@@ -214,6 +231,8 @@ if files:
             pixel_size=PIXEL_SIZE,
             square_size=SQUARE_SIZE,
         )
+
+write_status('Cropping and scaling complete. Merging geotiffs...')
 
 # Merge all geotiffs into a single geotiff
 # Get the SAR data files (.tiff)
@@ -231,14 +250,10 @@ merge_geotiffs(sar_files, output_file=f'{file_path}/data/merged.tiff')
 
 polygons = [f'POLYGON(({wkt_string}))']
 
-print(f'Merging polygons: {polygons}')
 
 input_file = f'{file_path}/data/merged.tiff'
 draw_wkt_to_geotiff(polygons, input_file, output_file=f'{file_path}/data/merged_wkt.tiff')
 
-print(f'Finished processing {wkt_string}. Ready for model usage.')
-
-# Cut tiff into squares of SQUARE_SIZExSQUARE_SIZE pixels
 
 import os
 import numpy as np
@@ -265,7 +280,6 @@ def extract_bands_from_tiff(tiff_path):
     for band_idx in range(num_bands):
         band = ds.GetRasterBand(band_idx + 1)
         bands_array[band_idx] = band.ReadAsArray()
-        print(f'Wrote {band_idx+1} into output')
     
     ds = None
     return bands_array
@@ -302,12 +316,10 @@ def cut_into_squares(array, square_size=SQUARE_SIZE):
     # Add batch dimension: (num_patches, channels, H, W) -> (num_patches, 1, channels, H, W)
     return torch.from_numpy(np.array(squares)).unsqueeze(1)
 
+write_status('Extracting bands from merged_wkt.tiff...')
 
 bands = extract_bands_from_tiff(f'{file_path}/data/merged_wkt.tiff')
 squares = cut_into_squares(bands, square_size=SQUARE_SIZE)
-
-print(squares.shape)
-print(type(squares))
 
 results = []
 
@@ -315,16 +327,17 @@ results = []
 import torch
 from model import SimpleFireCNN
 
+write_status('Loading model and running inference...')
+
 model = SimpleFireCNN()
 model.load_state_dict(torch.load(f'{os.getcwd()}/assets/model/simple_fire_cnn.pth'))
-print(model)
 model.eval()
 
 with torch.no_grad():
     for square in squares:
         results.append(model(square).numpy())
 
-print('Model run complete. Results:', len(results))
+write_status('Model run complete. Stitching results...')
 
 # Stitch the results back together
 
@@ -342,8 +355,6 @@ def stitch_results(squares, square_size=SQUARE_SIZE):
     
     stitched_array = np.zeros((stitched_height, stitched_width), dtype=squares[0].dtype)
     
-    print(squares[0].squeeze()[0:100, 0:100])
-
     for idx, square in enumerate(squares):
         row = idx // num_cols
         col = idx % num_cols
@@ -351,15 +362,11 @@ def stitch_results(squares, square_size=SQUARE_SIZE):
         x_offset = col * square_size
         stitched_array[y_offset:y_offset + square_size, x_offset:x_offset + square_size] = square.squeeze() * 255
     
-    print(stitched_array[0:10, 0:10])
     return stitched_array.astype(np.uint8)
 
-print('Stitching results back together...')
 stitched_results = stitch_results(results)
 
-print(f'Stitched results shape: {stitched_results.shape}')
 # Save the stitched results
-output_dir = f'{os.getcwd()}/assets/tmp/{date_str}'
 if not os.path.exists(output_dir):
     os.makedirs(output_dir)
 
@@ -370,6 +377,5 @@ def save_as_png(array, output_path):
     img = Image.fromarray(array)
     img.save(output_path)
 
-print(f'Saving stitched results to {output_dir}/output.png')
 # Data should always be 3 bands, so we can save it as RGB
 save_as_png(stitched_results, f'{output_dir}/output.png')

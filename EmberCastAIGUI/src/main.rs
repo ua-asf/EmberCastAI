@@ -1,7 +1,7 @@
 #![allow(non_snake_case)]
 
 use dioxus::{
-    document::{Link, Style, Title},
+    document::{Style, Title},
     prelude::*,
 };
 use tokio::process::Command;
@@ -14,6 +14,8 @@ pub static USERNAME: GlobalSignal<Option<String>> = GlobalSignal::new(|| None);
 pub static PASSWORD: GlobalSignal<Option<String>> = GlobalSignal::new(|| None);
 pub static WKT_STRING: GlobalSignal<Option<String>> = GlobalSignal::new(|| None);
 pub static OUTPUT_FILES: GlobalSignal<Vec<String>> = GlobalSignal::new(Vec::new);
+pub static STATUS_MESSAGE: GlobalSignal<Option<String>> = GlobalSignal::new(|| None);
+pub static INDEX: GlobalSignal<usize> = GlobalSignal::new(|| 0);
 
 pub static THROBBER: Asset = asset!("assets/throbber.svg");
 
@@ -93,7 +95,10 @@ fn UIinputs() -> Element {
             div {
                 p { "Earthdata Password" }
                 input {
-                    style: format!("letter-spacing: 2pt; border-color: {}", if password_error() { "red" } else { "white" }),
+                    style: format!(
+                        "letter-spacing: 2pt; border-color: {}",
+                        if password_error() { "red" } else { "white" },
+                    ),
                     r#type: "password",
                     oninput: move |e| {
                         *PASSWORD.write() = Some(e.value().clone());
@@ -120,15 +125,15 @@ fn UIinputs() -> Element {
                     style: "width: 100%; padding: 5px;",
                     onclick: move |_| {
                         let mut errors = false;
-                        if !USERNAME.read().clone().is_some_and(|v| !v.is_empty()) {
+                        if USERNAME.read().clone().is_none_or(|v| v.is_empty()) {
                             username_error.set(true);
                             errors = true;
                         }
-                        if !PASSWORD.read().clone().is_some_and(|v| !v.is_empty()) {
+                        if PASSWORD.read().clone().is_none_or(|v| v.is_empty()) {
                             password_error.set(true);
                             errors = true;
                         }
-                        if !WKT_STRING.read().clone().is_some_and(|v| !v.is_empty()) {
+                        if WKT_STRING.read().clone().is_none_or(|v| v.is_empty()) {
                             wkt_string_error.set(true);
                             errors = true;
                         }
@@ -141,6 +146,11 @@ fn UIinputs() -> Element {
                             .format(date_format_str)
                             .to_string();
                         println!("Formatted date: {}", formatted_date);
+
+                        if !OUTPUT_FILES.read().is_empty() {
+                            *INDEX.write() = OUTPUT_FILES.read().len() - 1;
+                        }
+
                         OUTPUT_FILES.write().push(THROBBER.to_string());
                         spawn(async move {
                             run_model(
@@ -176,7 +186,7 @@ fn Separator() -> Element {
 fn RenderImage() -> Element {
     let files_count = OUTPUT_FILES.read().len();
 
-    let mut index: Signal<usize> = use_signal(|| 0);
+    let index = *INDEX.read();
 
     rsx! {
         div { style: "padding-left: 20px; padding-right: 20px; display: flex; flex-direction: column; justify-content: start; align-items: center; height: 100vh; width: 100%; overflow: hidden",
@@ -184,10 +194,10 @@ fn RenderImage() -> Element {
             div { style: "display: flex; justify-content: center; align-items: center; align-self: start; width: 100%; gap: 10px; padding-bottom: 10px; padding-top: 20px;",
                 // Previous/Decrement button
                 button {
-                    disabled: index() == 0,
+                    disabled: index == 0,
                     onclick: move |_| {
-                        if index() > 0 {
-                            index.set(index() - 1);
+                        if index > 0 {
+                            *INDEX.write() = INDEX() - 1;
                         }
                     },
                     "← Previous"
@@ -204,10 +214,10 @@ fn RenderImage() -> Element {
 
                 // Next/Increment button
                 button {
-                    disabled: index() + 1 >= files_count,
+                    disabled: index + 1 >= files_count,
                     onclick: move |_| {
-                        if index() < files_count - 1 {
-                            index.set(index() + 1);
+                        if index < files_count - 1 {
+                            *INDEX.write() = index + 1;
                         }
                     },
                     "Next →"
@@ -216,20 +226,26 @@ fn RenderImage() -> Element {
 
             // Render the selected image if any are available
             if !OUTPUT_FILES.read().is_empty() {
-                if OUTPUT_FILES.read()[index()].ends_with("svg") {
+                if OUTPUT_FILES.read()[index].ends_with("svg") {
                     img {
                         style: "padding-top: 30px; padding-bottom: 10px; align-self: center;",
                         fill: "#fff",
                         width: "200",
                         height: "200",
-                        src: OUTPUT_FILES.read()[index()].clone(),
+                        src: OUTPUT_FILES.read()[index].clone(),
                     }
-                    p { style: "font-size: 24px;", "Processing..." }
+                    p { style: "font-size: 24px;",
+                        if let Some(message) = STATUS_MESSAGE.read().clone() {
+                            "{message}"
+                        } else {
+                            "Processing..."
+                        }
+                    }
                 } else {
                     // Display the current image
                     div { style: "height: 100%; width: 100%; align-content: center",
                         img {
-                            src: load_image_from_file(OUTPUT_FILES.read()[index()].clone()),
+                            src: load_image_from_file(OUTPUT_FILES.read()[index].clone()),
                             alt: "Processed Image",
                             style: "max-width: 100%;
                             max-height: 100%;
@@ -245,9 +261,11 @@ fn RenderImage() -> Element {
 }
 
 fn load_image_from_file(path: String) -> String {
+    use base64::prelude::*;
+
     let file_content = std::fs::read(path).expect("Failed to read image file");
 
-    let encoded_image = base64::encode(file_content);
+    let encoded_image = BASE64_STANDARD.encode(file_content);
 
     format!("data:image/png;base64,{}", encoded_image)
 }
@@ -265,7 +283,7 @@ fn load_image_from_file(path: String) -> String {
 /// This function does not return a value. It spawns a process and waits for it to finish.
 /// The output file path is stored in the `OUTPUT_FILE` global signal.
 async fn run_model(username: &str, password: &str, wkt_string: &str, date: &str) {
-    let output = Command::new("nix")
+    let mut child = Command::new("nix")
         .arg("run")
         .arg(".")
         .arg("--")
@@ -273,26 +291,45 @@ async fn run_model(username: &str, password: &str, wkt_string: &str, date: &str)
         .arg(password)
         .arg(format!("\"{wkt_string}\""))
         .arg(date)
-        .output()
-        .await
-        .expect("Failed to start child process");
+        .spawn()
+        .expect("Failed to spawn child process");
 
-    // Write output to log file
-    let file_path = format!("assets/tmp/{}/log.txt", date);
-    std::fs::create_dir_all(format!("assets/tmp/{}", date)).expect("Failed to create directory");
-    std::fs::write(&file_path, std::str::from_utf8(&*output.stdout).unwrap())
-        .expect("Failed to write log file");
-    std::fs::write(
-        format!("assets/tmp/{}/error.txt", date),
-        std::str::from_utf8(&*output.stderr).unwrap(),
-    )
-    .expect("Failed to write error file");
+    let mut success = false;
+
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                success = status.success();
+                break;
+            }
+            Ok(None) => {
+                // Check the log file for a new status message
+                let status_log_path = format!("assets/tmp/{}/status.txt", date);
+                let status_message = std::fs::read_to_string(&status_log_path)
+                    .unwrap_or_else(|_| "Processing...".to_string());
+
+                *STATUS_MESSAGE.write() = Some(status_message);
+
+                // Process is still running, wait a bit before checking again
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            }
+            Err(e) => {
+                eprintln!("Error waiting for child process: {}", e);
+                break;
+            }
+        }
+    }
+
+    // Reset status message
+    *STATUS_MESSAGE.write() = None;
 
     // Drop trhobber
     std::mem::drop(OUTPUT_FILES.write().pop());
 
     // Look for file in assets/tmp/{date}/output.png
-    OUTPUT_FILES
-        .write()
-        .push(format!("assets/tmp/{}/output.png", date));
+    if success {
+        OUTPUT_FILES
+            .write()
+            .push(format!("assets/tmp/{}/output.png", date));
+    }
 }
