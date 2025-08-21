@@ -44,10 +44,15 @@ pub fn App() -> Element {
                 font-family: 'Pixel';
                 font-size: 18px;
                 border-radius: 0px;
+            }}
+
+            input {{
+                font-family: 'Pixel';
             }}"#
         }
         div { style: "text-align: center;
             height: 100%;
+            width: 100vw;
             display: grid;
             gap: 20px;
             grid-template-columns: auto 5px 1fr;
@@ -88,7 +93,7 @@ fn UIinputs() -> Element {
             div {
                 p { "Earthdata Password" }
                 input {
-                    style: format!("border-color: {}", if password_error() { "red" } else { "white" }),
+                    style: format!("letter-spacing: 2pt; border-color: {}", if password_error() { "red" } else { "white" }),
                     r#type: "password",
                     oninput: move |e| {
                         *PASSWORD.write() = Some(e.value().clone());
@@ -139,11 +144,12 @@ fn UIinputs() -> Element {
                         OUTPUT_FILES.write().push(THROBBER.to_string());
                         spawn(async move {
                             run_model(
-                                &USERNAME().unwrap_or_default(),
-                                &PASSWORD().unwrap_or_default(),
-                                &WKT_STRING().unwrap_or_default(),
-                                &formatted_date,
-                            ).await;
+                                    &USERNAME().unwrap_or_default(),
+                                    &PASSWORD().unwrap_or_default(),
+                                    &WKT_STRING().unwrap_or_default(),
+                                    &formatted_date,
+                                )
+                                .await;
                             button_clickable.set(true);
                         });
                     },
@@ -162,21 +168,20 @@ fn UIinputs() -> Element {
 #[component]
 fn Separator() -> Element {
     rsx! {
-        div { style: "width: 8px; height: 100%; background-color: #FFF;" }
+        div { style: "width: 5px; height: 100%; background-color: #FFF;" }
     }
 }
 
 #[component]
 fn RenderImage() -> Element {
-    let output_files = OUTPUT_FILES();
-    let files_count = output_files.len();
+    let files_count = OUTPUT_FILES.read().len();
 
     let mut index: Signal<usize> = use_signal(|| 0);
 
     rsx! {
-        div { style: "padding: 20px; align-self: start; flex: 1 0 auto;",
+        div { style: "padding-left: 20px; padding-right: 20px; display: flex; flex-direction: column; justify-content: start; align-items: center; height: 100vh; width: 100%; overflow: hidden",
             // Image navigation buttons
-            div { style: "display: flex; justify-content: center; align-items: center; gap: 10px;",
+            div { style: "display: flex; justify-content: center; align-items: center; align-self: start; width: 100%; gap: 10px; padding-bottom: 10px; padding-top: 20px;",
                 // Previous/Decrement button
                 button {
                     disabled: index() == 0,
@@ -210,21 +215,26 @@ fn RenderImage() -> Element {
             }
 
             // Render the selected image if any are available
-            if !output_files.is_empty() {
-                if output_files[index()].ends_with("svg") {
-                    img { style: "padding-top: 30px; padding-bottom: 10px;",
+            if !OUTPUT_FILES.read().is_empty() {
+                if OUTPUT_FILES.read()[index()].ends_with("svg") {
+                    img {
+                        style: "padding-top: 30px; padding-bottom: 10px; align-self: center;",
                         fill: "#fff",
                         width: "200",
                         height: "200",
-                        src: output_files[index()].clone(),
+                        src: OUTPUT_FILES.read()[index()].clone(),
                     }
                     p { style: "font-size: 24px;", "Processing..." }
                 } else {
                     // Display the current image
-                    img {
-                        src: load_image_from_file(output_files[index()].clone()),
-                        alt: "Processed Image",
-                        style: "width: 100%; height: auto; object-fit: contain; padding: 10px; border: 1px solid #000;",
+                    div { style: "height: 100%; width: 100%; align-content: center",
+                        img {
+                            src: load_image_from_file(OUTPUT_FILES.read()[index()].clone()),
+                            alt: "Processed Image",
+                            style: "max-width: 100%;
+                            max-height: 100%;
+                            object-fit: contain;",
+                        }
                     }
                 }
             } else {
