@@ -20,8 +20,6 @@ if len(sys.argv) < 4:
     print('Usage: python process.py <username> <password> <wkt_string> [date]')
     sys.exit(1)
 
-print(f'{sys.argv}')
-
 # Get user and password credentials from the inputs
 username = sys.argv[1]
 password = sys.argv[2]
@@ -39,7 +37,6 @@ def write_status(message):
         os.makedirs(output_dir)
     with open(f'{output_dir}/status.txt', 'w') as f:
         f.write(message)
-
 
 write_status(f'Starting processing for WKT...')
 
@@ -65,8 +62,6 @@ long_min = 180
 long_max = -180
 
 extremes = (lat_min, lat_max, long_min, long_max)
-
-print(f'Getting extremes for WKT: {wkt_string}')
 
 # Remove the 'POLYGON ((' and '))\n' from the line
 wkt_string = wkt_string.removeprefix('"').removeprefix('POLYGON').removeprefix(' ').removeprefix('((').removesuffix('"').removesuffix('))')
@@ -101,8 +96,6 @@ for line in coords:
     # Find the nearest multiple of SQUARE_SIZE * PIXEL_SIZE meters + some extra space
     new_width = (math.ceil(width / square_size) + 3) * square_size
 
-    print(f'New width: {new_width}')
-
     # Adjust the extremes up and down to fit the new width, back into lat/long
     # Get the difference between the new width and the old width
     new_lat_diff = (new_width - lat_dist) / 2
@@ -118,8 +111,6 @@ for line in coords:
 
     # Update the extremes for the fire
     extremes = (lat_min, lat_max, long_min, long_max)
-
-print(f'Extremes: {extremes}')
 
 session = asf.ASFSession()
 
@@ -162,16 +153,12 @@ results = []
 while len(results) == 0:
     results = asf.geo_search(**options)
 
-    print(f'Found {len(results)} results')
-
     delta += delta
     options['end'] = options['start']
     options['start'] = (date - timedelta(days=delta)).strftime(date_format_str)
 
     if delta > 1000:
         raise ValueError(f'No data found for fire on {date}')
-
-    print(f'Start: {options["start"]}, End: {options["end"]}')
 
     if len(results) > 0:
         # Sort by date
@@ -196,9 +183,6 @@ while len(results) == 0:
             # Check if the coordinates are within the bounds of the fire
             # The order goes [0] = top left, [1] = top right, [2] = bottom right, [3] = bottom left
             if candidate_polygon.contains_properly(fire_polygon):
-                print(f'Found {result.properties['sceneName']}')
-                print(f'Candidate polygon: {candidate_polygon}')
-                print(f'Fire polygon: {fire_polygon}')
                 results = [result]
                 break
             else:
@@ -254,7 +238,6 @@ polygons = [f'POLYGON(({wkt_string}))']
 input_file = f'{file_path}/data/merged.tiff'
 draw_wkt_to_geotiff(polygons, input_file, output_file=f'{file_path}/data/merged_wkt.tiff')
 
-
 import os
 import numpy as np
 from datetime import datetime
@@ -269,7 +252,6 @@ def extract_bands_from_tiff(tiff_path):
         raise ValueError(f"Could not open {tiff_path}")
     
     num_bands = ds.RasterCount
-    print(f'Found {num_bands} bands!')
     
     xsize = ds.RasterXSize
     ysize = ds.RasterYSize
@@ -377,5 +359,12 @@ def save_as_png(array, output_path):
     img = Image.fromarray(array)
     img.save(output_path)
 
-# Data should always be 3 bands, so we can save it as RGB
+# Save the original WKT band as an image for comparison
+# Convert the WKT band to a u8 int array
+print(bands[0])
+data = bands[0].astype(np.uint8)
+print(data)
+save_as_png(data, f'{output_dir}/original.png')
+
+# Save the stitched results as a PNG
 save_as_png(stitched_results, f'{output_dir}/output.png')

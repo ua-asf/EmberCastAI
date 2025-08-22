@@ -235,21 +235,23 @@ def draw_wkt_to_geotiff(wkt_strs: list[str], input_file: str, output_file: str, 
 
     wkt_strs = [wkt for wkt in wkt_strs if ogr.CreateGeometryFromWkt(wkt) is not None]
 
-    in_band = src_ds.GetRasterBand(1)
-    data = in_band.ReadAsArray()
-    dtype = in_band.DataType
-
     # Create output with 1 additional band for the mask
     bands = src_ds.RasterCount + 1
+    print(f'bands: {bands}')
+    dtype = gdal.GDT_Byte
 
     driver = gdal.GetDriverByName("GTiff")
+    dtype = src_ds.GetRasterBand(1).DataType
     out_ds = driver.Create(output_file, xsize, ysize, bands, dtype)
     out_ds.SetGeoTransform(geotransform)
     out_ds.SetProjection(projection)
-
-    # Copy original data to band 1
-    out_band1 = out_ds.GetRasterBand(1)
-    out_band1.WriteArray(data)
+    for band in range(1, bands):
+        in_band = src_ds.GetRasterBand(band)
+        data = in_band.ReadAsArray()
+        dtype = in_band.DataType
+        # Copy original data over
+        out_band = out_ds.GetRasterBand(band + 1)
+        out_band.WriteArray(data)
 
     # Create mask for WKT shapes
     mem_driver = gdal.GetDriverByName("MEM")
@@ -257,7 +259,7 @@ def draw_wkt_to_geotiff(wkt_strs: list[str], input_file: str, output_file: str, 
     mask_ds.SetGeoTransform(geotransform)
     mask_ds.SetProjection(projection)
     mask_band = mask_ds.GetRasterBand(1)
-    mask_band.Fill(fill_value)
+    mask_band.Fill(0)
 
     # Prepare layer and geometries
     srs = osr.SpatialReference()
@@ -274,12 +276,12 @@ def draw_wkt_to_geotiff(wkt_strs: list[str], input_file: str, output_file: str, 
         mem_layer.CreateFeature(feature)
 
     # Rasterize WKT shapes into mask (value = 1)
-    gdal.RasterizeLayer(mask_ds, [1], mem_layer, burn_values=[1], options=["ALL_TOUCHED=TRUE"])
+    gdal.RasterizeLayer(mask_ds, [1], mem_layer, burn_values=[fill_value], options=["ALL_TOUCHED=TRUE"])
     mask = mask_band.ReadAsArray()
 
-    # Write WKT mask to second band
-    out_band2 = out_ds.GetRasterBand(2)
-    out_band2.WriteArray(mask)
+    # Write WKT mask to first band of output
+    out_band = out_ds.GetRasterBand(1)
+    out_band.WriteArray(mask)
 
     # Clean up
     out_ds.FlushCache()

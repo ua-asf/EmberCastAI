@@ -13,7 +13,7 @@ fn main() {
 pub static USERNAME: GlobalSignal<Option<String>> = GlobalSignal::new(|| None);
 pub static PASSWORD: GlobalSignal<Option<String>> = GlobalSignal::new(|| None);
 pub static WKT_STRING: GlobalSignal<Option<String>> = GlobalSignal::new(|| None);
-pub static OUTPUT_FILES: GlobalSignal<Vec<String>> = GlobalSignal::new(Vec::new);
+pub static OUTPUT_FILES: GlobalSignal<Vec<(String, String)>> = GlobalSignal::new(Vec::new);
 pub static STATUS_MESSAGE: GlobalSignal<Option<String>> = GlobalSignal::new(|| None);
 pub static INDEX: GlobalSignal<usize> = GlobalSignal::new(|| 0);
 
@@ -50,14 +50,15 @@ pub fn App() -> Element {
 
             input {{
                 font-family: 'Pixel';
+                text-align: center;
             }}"#
         }
         div { style: "text-align: center;
             height: 100%;
             width: 100vw;
-            display: grid;
+            display: flex;
+            flex-direction: column;
             gap: 20px;
-            grid-template-columns: auto 5px 1fr;
             height: 100%;
             flex: 1,
             margin: 0px 0px;
@@ -79,7 +80,7 @@ fn UIinputs() -> Element {
     let mut button_clickable = use_signal(|| true);
 
     rsx! {
-        div { style: "display: flex; flex-direction: column; flex: 0 1 auto; justify-content: center; padding: 20px; min-height: 50%; max-height: 80%",
+        div { style: "display: flex; flex-direction: row; flex: 1 0 auto; justify-content: center; padding: 5px; gap: 20px",
             div {
                 p { "Earthdata Username" }
                 input {
@@ -146,12 +147,7 @@ fn UIinputs() -> Element {
                             .format(date_format_str)
                             .to_string();
                         println!("Formatted date: {}", formatted_date);
-
-                        if !OUTPUT_FILES.read().is_empty() {
-                            *INDEX.write() = OUTPUT_FILES.read().len();
-                        }
-
-                        OUTPUT_FILES.write().push(THROBBER.to_string());
+                        OUTPUT_FILES.write().push((THROBBER.to_string(), String::new()));
                         spawn(async move {
                             run_model(
                                     &USERNAME().unwrap_or_default(),
@@ -178,7 +174,7 @@ fn UIinputs() -> Element {
 #[component]
 fn Separator() -> Element {
     rsx! {
-        div { style: "width: 5px; height: 100%; background-color: #FFF;" }
+        div { style: "width: 100%; height: 5px; background-color: #FFF;" }
     }
 }
 
@@ -186,18 +182,16 @@ fn Separator() -> Element {
 fn RenderImage() -> Element {
     let files_count = OUTPUT_FILES.read().len();
 
-    let index = *INDEX.read();
-
     rsx! {
-        div { style: "padding-left: 20px; padding-right: 20px; display: flex; flex-direction: column; justify-content: start; align-items: center; height: 100vh; width: 100%; overflow: hidden",
+        div { style: "display: flex; flex-direction: column; justify-content: start; align-items: center; height: 100vh; width: 100%; overflow: hidden",
             // Image navigation buttons
-            div { style: "display: flex; justify-content: center; align-items: center; align-self: start; width: 100%; gap: 10px; padding-bottom: 10px; padding-top: 20px;",
+            div { style: "display: flex; justify-content: center; align-items: center; align-self: start; width: 100%; gap: 10px; padding-bottom: 10px; padding-top: 10px;",
                 // Previous/Decrement button
                 button {
-                    disabled: index == 0,
+                    disabled: *INDEX.read() == 0,
                     onclick: move |_| {
-                        if index > 0 {
-                            *INDEX.write() = INDEX() - 1;
+                        if *INDEX.read() > 0 {
+                            *INDEX.write() = *INDEX.read() - 1;
                         }
                     },
                     "← Previous"
@@ -206,7 +200,7 @@ fn RenderImage() -> Element {
                 // Count
                 p { style: "margin: 0; padding: 2px;",
                     if files_count > 0 {
-                        "{index + 1}/{files_count}"
+                        "{*INDEX.read() + 1}/{files_count}"
                     } else {
                         "0/0"
                     }
@@ -214,10 +208,10 @@ fn RenderImage() -> Element {
 
                 // Next/Increment button
                 button {
-                    disabled: index + 1 >= files_count,
+                    disabled: *INDEX.read() + 1 >= files_count,
                     onclick: move |_| {
-                        if index < files_count - 1 {
-                            *INDEX.write() = index + 1;
+                        if *INDEX.read() < files_count - 1 {
+                            *INDEX.write() = *INDEX.read() + 1;
                         }
                     },
                     "Next →"
@@ -226,13 +220,13 @@ fn RenderImage() -> Element {
 
             // Render the selected image if any are available
             if !OUTPUT_FILES.read().is_empty() {
-                if OUTPUT_FILES.read()[index].ends_with("svg") {
+                if OUTPUT_FILES.read()[*INDEX.read()].0.ends_with("svg") {
                     img {
                         style: "padding-top: 30px; padding-bottom: 10px; align-self: center;",
                         fill: "#fff",
                         width: "200",
                         height: "200",
-                        src: OUTPUT_FILES.read()[index].clone(),
+                        src: "{OUTPUT_FILES.read()[*INDEX.read()].0.clone()}",
                     }
                     p { style: "font-size: 24px;",
                         if let Some(message) = STATUS_MESSAGE.read().clone() {
@@ -242,14 +236,29 @@ fn RenderImage() -> Element {
                         }
                     }
                 } else {
-                    // Display the current image
-                    div { style: "height: 100%; width: 100%; align-content: center",
-                        img {
-                            src: load_image_from_file(OUTPUT_FILES.read()[index].clone()),
-                            alt: "Processed Image",
-                            style: "max-width: 100%;
-                            max-height: 100%;
-                            object-fit: contain;",
+                    // Display both images side by side
+                    div { style: "height: 100%; width: 100%; align-content: center; justify-content: space-around; display: flex; ",
+                       div {
+                            p { style: "color: red", "Original" }
+                            img {
+                                src: "{load_image_from_file(OUTPUT_FILES.read()[*INDEX.read()].0.clone())}",
+                                alt: "Processed Image",
+                                style: "max-width: 80%;
+                                max-height: 100%;
+                                border: 5px solid red;
+                                object-fit: contain;",
+                            }
+                        }
+                        div {
+                            p { style: "color: green", "Prediction" }
+                            img {
+                                src: "{load_image_from_file(OUTPUT_FILES.read()[*INDEX.read()].1.clone())}",
+                                alt: "Processed Image",
+                                style: "max-width: 80%;
+                                max-height: 100%;
+                                border: 5px solid green;
+                                object-fit: contain;",
+                            }
                         }
                     }
                 }
@@ -328,8 +337,9 @@ async fn run_model(username: &str, password: &str, wkt_string: &str, date: &str)
 
     // Look for file in assets/tmp/{date}/output.png
     if success {
-        OUTPUT_FILES
-            .write()
-            .push(format!("assets/tmp/{}/output.png", date));
+        OUTPUT_FILES.write().push((
+            format!("assets/tmp/{}/original.png", date),
+            format!("assets/tmp/{}/output.png", date),
+        ));
     }
 }
