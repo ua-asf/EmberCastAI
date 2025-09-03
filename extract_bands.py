@@ -34,10 +34,29 @@ def extract_bands_from_tiff(tiff_path):
     xsize = ds.RasterXSize
     ysize = ds.RasterYSize
     bands_array = np.zeros((ysize, xsize, num_bands), dtype=np.float32)
+    
+    print(f"  Found {num_bands} bands in {os.path.basename(tiff_path)}")
+    
     for band_idx in range(num_bands):
         band = ds.GetRasterBand(band_idx + 1)
         data = band.ReadAsArray()
         bands_array[:, :, band_idx] = data
+        
+        # Print band description if available
+        band_desc = band.GetDescription()
+        if band_desc:
+            print(f"    Band {band_idx + 1}: {band_desc}")
+        else:
+            # Try to infer band type based on index
+            if num_bands >= 3:
+                band_names = ["VV", "VH", "WKT_Mask", "DEM_Elevation"]
+                if band_idx < len(band_names):
+                    print(f"    Band {band_idx + 1}: {band_names[band_idx]} (inferred)")
+                else:
+                    print(f"    Band {band_idx + 1}: Unknown")
+            else:
+                print(f"    Band {band_idx + 1}: Band_{band_idx + 1}")
+    
     ds = None
     return bands_array
 
@@ -108,4 +127,15 @@ if __name__ == "__main__":
     print(f"Total squares extracted: {total_squares}")
     for fire_name, squares in all_fires_data.items():
         if squares:
-            print(f"  {fire_name}: {len(squares)} squares, shape: {squares[0].shape if squares else 'N/A'}")
+            shape = squares[0].shape if squares else 'N/A'
+            bands_info = ""
+            if len(shape) == 3:
+                if shape[2] == 2:
+                    bands_info = " (VV, VH)"
+                elif shape[2] == 3:
+                    bands_info = " (VV, VH, WKT)"
+                elif shape[2] == 4:
+                    bands_info = " (VV, VH, WKT, DEM)"
+                else:
+                    bands_info = f" ({shape[2]} bands)"
+            print(f"  {fire_name}: {len(squares)} squares, shape: {shape}{bands_info}")

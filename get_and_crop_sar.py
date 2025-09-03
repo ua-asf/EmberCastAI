@@ -8,9 +8,17 @@ from geo import crop_and_scale_to_20x20, haversine_distance, draw_wkt_to_geotiff
 from shapely.geometry import Polygon
 import shutil
 from utils import get_fires
+from bmi_topography import Topography
+from osgeo import gdal
+
+# Increase CMR timeout to handle slow responses
+try:
+    asf.constants.INTERNAL.CMR_TIMEOUT = 120  # Increase from 30 to 120 seconds
+    print(f"Set CMR timeout to {asf.constants.INTERNAL.CMR_TIMEOUT} seconds")
+except AttributeError:
+    print("Could not set CMR timeout - using default")
 
 # GDAL configuration
-from osgeo import gdal
 gdal.UseExceptions()
 
 # Dates used by the dataset are usually in the format YYYYMMDD
@@ -139,7 +147,9 @@ session.auth_with_creds(username=username, password=password)
 
 # in the format (FIRENAME: (LATMIN, LATMAX, LONGMIN, LONGMAX))
 # or            (FIRENAME: (s_min,  n_max,  w_min,   e_max))
-for fire, data in extremes.items():
+# Create a copy to avoid "dictionary changed size during iteration" error
+extremes_copy = extremes.copy()
+for fire, data in extremes_copy.items():
     path = os.path.join('organized_dataset', fire)
 
     # Check if the {fire}/data folder exists
@@ -150,8 +160,20 @@ for fire, data in extremes.items():
 
         print(f'{fire}: {fires[fire]}')
 
-        date = min(fires[fire], key=lambda x: datetime.strptime(os.path.basename(x), date_format_str))
-        date = datetime.strptime(os.path.basename(date), date_format_str)
+        # Try to parse with full format first, then fallback to date-only format
+        def parse_date_flexible(date_str):
+            try:
+                return datetime.strptime(date_str, date_format_str)
+            except ValueError:
+                try:
+                    # Try date with -0000 suffix
+                    return datetime.strptime(date_str, '%Y-%m-%d-%H%M')
+                except ValueError:
+                    # Try date-only format
+                    return datetime.strptime(date_str, '%Y-%m-%d')
+        
+        date = min(fires[fire], key=lambda x: parse_date_flexible(os.path.basename(x)))
+        date = parse_date_flexible(os.path.basename(date))
 
         print(f'Getting data for {fire} on {date}')
 
@@ -167,25 +189,39 @@ for fire, data in extremes.items():
 
             date_start = date - timedelta(days=delta)
 
+            # ASF search expects dates - try datetime objects first, then strings
+            print(f"DEBUG: Using dates - start: {date_start}, end: {date_end}")
+            
             options = {
                 'dataset': 'SENTINEL-1',
                 'intersectsWith': polygon,
                 'polarization': ['VV+VH'],
                 'processingLevel': 'GRD_HD',
-                'start': date_start.strftime(date_format_str),
-                'end': date_end.strftime(date_format_str),
+                'start': date_start,
+                'end': date_end,
             }
 
             results = []
 
             while len(results) == 0:
-                results = asf.geo_search(**options)
+                # Add retry logic for ASF search
+                max_retries = 3
+                for attempt in range(max_retries):
+                    try:
+                        results = asf.geo_search(**options)
+                        break  # Success, exit retry loop
+                    except Exception as search_error:
+                        print(f"ASF search attempt {attempt + 1}/{max_retries} failed: {search_error}")
+                        if attempt == max_retries - 1:
+                            raise  # Re-raise on final attempt
+                        import time
+                        time.sleep(10)  # Wait 10 seconds before retry
 
                 print(f'Found {len(results)} results')
 
                 delta += delta
                 options['end'] = options['start']
-                options['start'] = (date - timedelta(days=delta)).strftime(date_format_str)
+                options['start'] = date - timedelta(days=delta)
 
                 if delta > 1000:
                     raise ValueError(f'No data found for {fire} on {date}')
@@ -251,14 +287,26 @@ for fire, data in extremes.items():
         except Exception as e:
             print(f'Error with {fire}: {e}')
             # Remove the fire from the fires dict, extremes, and organized_dataset
-            del fires[fire]
-            shutil.rmtree(f'organized_dataset/{fire}')
+            if fire in fires:
+                del fires[fire]
+            if fire in extremes:
+                del extremes[fire]
+            if os.path.exists(f'organized_dataset/{fire}'):
+                shutil.rmtree(f'organized_dataset/{fire}')
             continue
 
 # Merge all geotiffs into a single geotiff
 for fire, data in fires.items():
+    # Skip if fire was removed from extremes due to errors
+    if fire not in extremes:
+        continue
+        
     # Get the SAR data files (.tiff)
     sar_files = [file for file in os.listdir(f'organized_dataset/{fire}/data') if file.endswith('.tiff') and file != 'merged.tiff']
+
+    # Skip if no SAR files found
+    if not sar_files:
+        continue
 
     # Sort such that the vv band is first, then the vh band
     if 'vh' in sar_files[0]:
@@ -267,8 +315,10 @@ for fire, data in fires.items():
     # Append full file path to each file
     sar_files = [os.path.join(f'organized_dataset/{fire}/data', file) for file in sar_files]
 
-    # Merge the files into a single geotiff
-    merge_geotiffs(sar_files, output_file=f'organized_dataset/{fire}/data/merged.tiff')
+    # Get fire bounds from extremes dictionary
+    bounds_data = extremes[fire]
+    fire_bounds = (bounds_data[0], bounds_data[1], bounds_data[2], bounds_data[3])  # lat_min, lat_max, lon_min, lon_max
+    merge_geotiffs(sar_files, output_file=f'organized_dataset/{fire}/data/merged.tiff', dem_bounds=fire_bounds)
 
 
 # Put the WKT fire pixel polygons onto the GeoTIFF
@@ -285,7 +335,7 @@ for fire, data in fires.items():
         with open(f'{day}/{wkt_file}', 'r') as f:
             polygons = []
 
-            # Every line is a polygon
+            # Every line is a polygonfire
             for line in f.readlines():
                 polygons.append(line.strip())
 

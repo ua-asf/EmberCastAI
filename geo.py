@@ -1,3 +1,5 @@
+import os
+import shutil
 from osgeo import gdal, ogr, osr
 import math
 
@@ -235,21 +237,24 @@ def draw_wkt_to_geotiff(wkt_strs: list[str], input_file: str, output_file: str, 
 
     wkt_strs = [wkt for wkt in wkt_strs if ogr.CreateGeometryFromWkt(wkt) is not None]
 
+    # Get data type from first band
     in_band = src_ds.GetRasterBand(1)
-    data = in_band.ReadAsArray()
     dtype = in_band.DataType
 
-    # Create output with 1 additional band for the mask
-    bands = src_ds.RasterCount + 1
+    # Keep same number of bands (don't add extra)
+    bands = src_ds.RasterCount
 
     driver = gdal.GetDriverByName("GTiff")
     out_ds = driver.Create(output_file, xsize, ysize, bands, dtype)
     out_ds.SetGeoTransform(geotransform)
     out_ds.SetProjection(projection)
 
-    # Copy original data to band 1
-    out_band1 = out_ds.GetRasterBand(1)
-    out_band1.WriteArray(data)
+    # Copy ALL input bands to output
+    for band_idx in range(1, bands + 1):
+        in_band = src_ds.GetRasterBand(band_idx)
+        data = in_band.ReadAsArray()
+        out_band = out_ds.GetRasterBand(band_idx)
+        out_band.WriteArray(data)
 
     # Create mask for WKT shapes
     mem_driver = gdal.GetDriverByName("MEM")
@@ -262,7 +267,15 @@ def draw_wkt_to_geotiff(wkt_strs: list[str], input_file: str, output_file: str, 
     # Prepare layer and geometries
     srs = osr.SpatialReference()
     srs.ImportFromEPSG(4326)
-    mem_vector_ds = ogr.GetDriverByName("MEM").CreateDataSource("")
+    
+    # Get MEM driver with error checking
+    mem_driver = ogr.GetDriverByName("MEM")
+    if mem_driver is None:
+        mem_driver = ogr.GetDriverByName("Memory")
+    if mem_driver is None:
+        raise RuntimeError("Could not get MEM or Memory driver from OGR")
+    
+    mem_vector_ds = mem_driver.CreateDataSource("")
     mem_layer = mem_vector_ds.CreateLayer("layer", srs=srs, geom_type=ogr.wkbPolygon)
 
     for wkt in wkt_strs:
@@ -277,9 +290,14 @@ def draw_wkt_to_geotiff(wkt_strs: list[str], input_file: str, output_file: str, 
     gdal.RasterizeLayer(mask_ds, [1], mem_layer, burn_values=[1], options=["ALL_TOUCHED=TRUE"])
     mask = mask_band.ReadAsArray()
 
-    # Write WKT mask to second band
-    out_band2 = out_ds.GetRasterBand(2)
-    out_band2.WriteArray(mask)
+    # Write WKT mask to band 3 (between SAR bands 1,2 and DEM band 4)
+    if bands >= 3:
+        out_band3 = out_ds.GetRasterBand(3)
+        out_band3.WriteArray(mask)
+    else:
+        # Fallback for files with fewer bands
+        out_band2 = out_ds.GetRasterBand(2)
+        out_band2.WriteArray(mask)
 
     # Clean up
     out_ds.FlushCache()
@@ -288,7 +306,15 @@ def draw_wkt_to_geotiff(wkt_strs: list[str], input_file: str, output_file: str, 
 
     print(f"Finalized output saved to: {output_file}")
 
-def merge_geotiffs(geotiffs, output_file):
+def merge_geotiffs(geotiffs, output_file, dem_bounds=None):
+    """
+    Merge multiple GeoTIFF files into a single multi-band GeoTIFF.
+    
+    Args:
+        geotiffs: List of GeoTIFF file paths to merge
+        output_file: Output merged file path
+        dem_bounds: Optional tuple of (lat_min, lat_max, lon_min, lon_max) to add DEM band
+    """
     first_ds = gdal.Open(geotiffs[0])
     if first_ds is None:
         raise ValueError(f"Could not open {geotiffs[0]}")
@@ -300,9 +326,13 @@ def merge_geotiffs(geotiffs, output_file):
     geotransform = first_ds.GetGeoTransform()
     dtype = first_ds.GetRasterBand(1).DataType
 
-    # Create output dataset with n bands
+    # Determine if we should add DEM band
+    add_dem = dem_bounds is not None
+    total_bands = len(geotiffs) + (1 if add_dem else 0)
+
+    # Create output dataset with n bands (+ optional DEM band)
     driver = gdal.GetDriverByName("GTiff")
-    out_ds = driver.Create(output_file, xsize, ysize, len(geotiffs), dtype)
+    out_ds = driver.Create(output_file, xsize, ysize, total_bands, dtype)
     out_ds.SetGeoTransform(geotransform)
     out_ds.SetProjection(projection)
 
@@ -317,11 +347,67 @@ def merge_geotiffs(geotiffs, output_file):
         data = ds.GetRasterBand(1).ReadAsArray()
         out_band.WriteArray(data)
         
+        # Set band description based on filename
+        band_name = os.path.basename(geotiff).split('.')[0].upper()
+        out_band.SetDescription(band_name)
+        
         ds = None
 
-    # Clean up
-    out_ds.FlushCache()
-    first_ds = None
-    out_ds = None
+    # Add DEM band if requested
+    if add_dem:
+        print("Adding DEM band to merged file...")
+        temp_merged = output_file + "_temp.tiff"
+        
+        # Close current output dataset
+        out_ds.FlushCache()
+        out_ds = None
+        first_ds = None
+        
+        # Rename current output to temp
+        os.rename(output_file, temp_merged)
+        
+        try:
+            # Import here to avoid circular imports
+            # Try full version first, then fallback to simple version
+            try:
+                from dem_utils import process_dem_for_fire
+            except ImportError:
+                print("Using simplified DEM processing for Docker environment")
+                from dem_utils_simple import simple_get_dem_for_fire_area
+                from dem_utils import add_dem_band_to_geotiff, resample_dem_to_match_sar
+                
+                # Simplified process_dem_for_fire equivalent
+                def process_dem_for_fire(fire_bounds, sar_file, output_dir):
+                    lat_min, lat_max, lon_min, lon_max = fire_bounds
+                    temp_dir = os.path.join(output_dir, 'temp_dem')
+                    os.makedirs(temp_dir, exist_ok=True)
+                    
+                    try:
+                        # Download DEM
+                        dem_file = simple_get_dem_for_fire_area(lat_min, lat_max, lon_min, lon_max, temp_dir)
+                        
+                        # Resample to match SAR
+                        resampled_dem = resample_dem_to_match_sar(dem_file, sar_file,
+                                                                os.path.join(temp_dir, 'resampled_dem.tif'))
+                        
+                        # Add DEM band to SAR
+                        output_file = add_dem_band_to_geotiff(sar_file, resampled_dem, sar_file)
+                        return output_file
+                    finally:
+                        if os.path.exists(temp_dir):
+                            shutil.rmtree(temp_dir)
+            
+            final_output = process_dem_for_fire(dem_bounds, temp_merged, os.path.dirname(output_file))
+            if final_output != output_file:
+                os.rename(final_output, output_file)
+        finally:
+            if os.path.exists(temp_merged):
+                os.remove(temp_merged)
+    else:
+        # Clean up normally if no DEM
+        out_ds.FlushCache()
+        first_ds = None
+        out_ds = None
 
-    print(f"Merged {len(geotiffs)} geotiffs into: {output_file}")
+    band_desc = f"{len(geotiffs)} SAR bands" + (" + DEM" if add_dem else "")
+    print(f"Merged {len(geotiffs)} geotiffs with {band_desc} into: {output_file}")

@@ -11,7 +11,11 @@ RUN apt-get update && apt-get install -y \
     python3-pip \
     python3-venv \
     python3-dev \
-    build-essential
+    build-essential \
+    python3-gdal \
+    libgdal-dev \
+    gdal-bin \
+    && rm -rf /var/lib/apt/lists/*
 
 # Set the working directory in the container
 WORKDIR /EmberCastAI
@@ -19,9 +23,12 @@ WORKDIR /EmberCastAI
 # Copy the necessary files to the container
 COPY . .
 
+# Set up environment to use system GDAL
+ENV GDAL_CONFIG=/usr/bin/gdal-config
+
 # Install the necessary Python libraries
-RUN python3 -m venv /opt/venv && \
-    /opt/venv/bin/pip install --upgrade pip && \
+RUN python3 -m venv /opt/venv --system-site-packages && \
+    /opt/venv/bin/pip install --upgrade pip setuptools wheel && \
     /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
 
 # Get the path for the venv
