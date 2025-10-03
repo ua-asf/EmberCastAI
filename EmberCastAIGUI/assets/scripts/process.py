@@ -228,7 +228,7 @@ files = generate_geocoded_grd(
 )
 
 write_status(
-    f"Geocoded GRD generated. Cropping and scaling data to 20x20 meter resolution..."
+    "Geocoded GRD generated. Cropping and scaling data to 20x20 meter resolution..."
 )
 
 # Perform translation for 20x20 pixel sizes
@@ -357,11 +357,9 @@ from model import SimpleFireCNN
 write_status("Loading model and running inference...")
 
 model = SimpleFireCNN()
-<<<<<<< HEAD
-model.load_state_dict(torch.load(f'{os.getcwd()}/assets/model/fire_predictor_model.pth'))
-=======
-model.load_state_dict(torch.load(f"{os.getcwd()}/assets/model/simple_fire_cnn.pth"))
->>>>>>> kb/feat/add-gui-mockup
+model.load_state_dict(
+    torch.load(f"{os.getcwd()}/assets/model/fire_predictor_model.pth")
+)
 model.eval()
 
 with torch.no_grad():
