@@ -15,6 +15,8 @@ from shapely.geometry import Polygon
 # Define the date format string
 date_format_str = '%Y-%m-%dT%H:%M:%S.%f'
 
+def process(username=None, password=None, wkt_string=None, date_str=None):
+
 # Read terminal inputs
 if len(sys.argv) < 4:
     print('Usage: python process.py <username> <password> <wkt_string> [date]')
@@ -312,7 +314,7 @@ from model import SimpleFireCNN
 write_status('Loading model and running inference...')
 
 model = SimpleFireCNN()
-model.load_state_dict(torch.load(f'{os.getcwd()}/assets/model/simple_fire_cnn.pth'))
+model.load_state_dict(torch.load(f'{os.getcwd()}/assets/model/fire_predictor_model.pth'))
 model.eval()
 
 with torch.no_grad():

@@ -4,6 +4,7 @@ use dioxus::{
     document::{Style, Title},
     prelude::*,
 };
+use std::collections::HashMap;
 use tokio::process::Command;
 
 fn main() {
@@ -18,6 +19,8 @@ pub static STATUS_MESSAGE: GlobalSignal<Option<String>> = GlobalSignal::new(|| N
 pub static INDEX: GlobalSignal<usize> = GlobalSignal::new(|| 0);
 
 pub static THROBBER: Asset = asset!("assets/throbber.svg");
+
+pub static API_ENDPOINT: &str = "http://127.0.0.1:8000";
 
 #[component]
 pub fn App() -> Element {
@@ -236,28 +239,34 @@ fn RenderImage() -> Element {
                         }
                     }
                 } else {
-                    // Display both images side by side
-                    div { style: "height: 100%; width: 100%; align-content: center; justify-content: space-around; display: flex; ",
-                       div {
-                            p { style: "color: red", "Original" }
-                            img {
-                                src: "{load_image_from_file(OUTPUT_FILES.read()[*INDEX.read()].0.clone())}",
-                                alt: "Processed Image",
-                                style: "max-width: 80%;
-                                max-height: 100%;
-                                border: 5px solid red;
-                                object-fit: contain;",
-                            }
-                        }
-                        div {
-                            p { style: "color: green", "Prediction" }
-                            img {
-                                src: "{load_image_from_file(OUTPUT_FILES.read()[*INDEX.read()].1.clone())}",
-                                alt: "Processed Image",
-                                style: "max-width: 80%;
-                                max-height: 100%;
-                                border: 5px solid green;
-                                object-fit: contain;",
+                    {
+                        let before_image = load_image_from_file(OUTPUT_FILES.read()[*INDEX.read()].0.clone());
+                        let after_image = load_image_from_file(OUTPUT_FILES.read()[*INDEX.read()].1.clone());
+                        rsx! {
+                            // Display both images side by side
+                            div { style: "height: 100%; width: 100%; align-content: center; justify-content: space-around; display: flex; ",
+                            div {
+                                    p { style: "color: red", "Original" }
+                                    img {
+                                        src: "{before_image}",
+                                        alt: "Processed Image",
+                                        style: "max-width: 80%;
+                                        max-height: 100%;
+                                        border: 5px solid red;
+                                        object-fit: contain;",
+                                    }
+                                }
+                                div {
+                                    p { style: "color: green", "Prediction" }
+                                    img {
+                                        src: "{after_image}",
+                                        alt: "Processed Image",
+                                        style: "max-width: 80%;
+                                        max-height: 100%;
+                                        border: 5px solid green;
+                                        object-fit: contain;",
+                                    }
+                                }
                             }
                         }
                     }
@@ -292,42 +301,36 @@ fn load_image_from_file(path: String) -> String {
 /// This function does not return a value. It spawns a process and waits for it to finish.
 /// The output file path is stored in the `OUTPUT_FILE` global signal.
 async fn run_model(username: &str, password: &str, wkt_string: &str, date: &str) {
-    let mut child = Command::new("nix")
-        .arg("run")
-        .arg(".")
-        .arg("--")
-        .arg(username)
-        .arg(password)
-        .arg(format!("\"{wkt_string}\""))
-        .arg(date)
-        .spawn()
-        .expect("Failed to spawn child process");
+    let wkt_stripped = wkt_string
+        .strip_prefix("POLYGON((")
+        .unwrap()
+        .strip_suffix("))")
+        .unwrap();
 
-    let mut success = false;
+    let wkt_strs: Vec<(&str, &str)> = wkt_stripped
+        .split(", ")
+        .map(|v| v.split_once(" ").unwrap())
+        .collect();
 
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                success = status.success();
-                break;
-            }
-            Ok(None) => {
-                // Check the log file for a new status message
-                let status_log_path = format!("assets/tmp/{}/status.txt", date);
-                let status_message = std::fs::read_to_string(&status_log_path)
-                    .unwrap_or_else(|_| "Processing...".to_string());
+    let wkt_list = format!(
+        "[ {} ]",
+        wkt_strs
+            .iter()
+            .map(|(x, y)| format!("[{}, {}]", x, y))
+            .collect::<Vec<String>>()
+            .join(", ")
+    );
 
-                *STATUS_MESSAGE.write() = Some(status_message);
+    let form = HashMap::from([
+        ("username", username),
+        ("password", password),
+        ("wkt_points", &wkt_list),
+        ("date_str", date),
+    ]);
 
-                // Process is still running, wait a bit before checking again
-                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-            }
-            Err(e) => {
-                eprintln!("Error waiting for child process: {}", e);
-                break;
-            }
-        }
-    }
+    let client = reqwest::Client::new();
+
+    let response = client.post(API_ENDPOINT).form(&form).send().await.unwrap();
 
     // Reset status message
     *STATUS_MESSAGE.write() = None;
@@ -336,7 +339,7 @@ async fn run_model(username: &str, password: &str, wkt_string: &str, date: &str)
     std::mem::drop(OUTPUT_FILES.write().pop());
 
     // Look for file in assets/tmp/{date}/output.png
-    if success {
+    if true {
         OUTPUT_FILES.write().push((
             format!("assets/tmp/{}/original.png", date),
             format!("assets/tmp/{}/output.png", date),
