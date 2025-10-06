@@ -1,4 +1,6 @@
 /dataset
+/tmp
+env.sh
 *.txt
 .env
 /organized_dataset

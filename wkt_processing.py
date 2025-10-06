@@ -17,6 +17,8 @@ from geo import (
     draw_wkt_to_geotiff,
     merge_geotiffs,
 )
+from dem import download_dem_from_bounds
+
 from shapely.geometry import Polygon
 
 from model import SimpleFireCNN
@@ -41,12 +43,7 @@ def get_wkt_extremes(
     long_min = 180
     long_max = -180
 
-    extremes = (lat_min, lat_max, long_min, long_max)
-
-    for lat, long in wkt_list:
-        lat = float(lat)
-        long = float(long)
-
+    for long, lat in wkt_list:
         # Update the extremes if necessary
         if lat < lat_min:
             lat_min = lat
@@ -57,38 +54,35 @@ def get_wkt_extremes(
         if long > long_max:
             long_max = long
 
-        # Scale the extremes to be a multiple of SQUARE_SIZE * PIXEL_SIZE meters, in a square
+    # Scale the extremes to be a multiple of SQUARE_SIZE * PIXEL_SIZE meters, in a square
 
-        # Get the distance of latitude and longitude
-        lat_dist = haversine_distance(lat_min, long_min, lat_max, long_min)
-        long_dist = haversine_distance(lat_min, long_min, lat_min, long_max)
+    # Get the distance of latitude and longitude
+    lat_dist = haversine_distance(lat_min, long_min, lat_max, long_min)
+    long_dist = haversine_distance(lat_min, long_min, lat_min, long_max)
 
-        # Get the larger of the two differences
-        width = max(lat_dist, long_dist)
+    # Get the larger of the two differences
+    width = max(lat_dist, long_dist)
 
-        # Get the square size in meters
-        square_size = SQUARE_SIZE * PIXEL_SIZE
+    # Get the square size in meters
+    square_size = SQUARE_SIZE * PIXEL_SIZE
 
-        # Find the nearest multiple of SQUARE_SIZE * PIXEL_SIZE meters + some extra space
-        new_width = (math.ceil(width / square_size) + 3) * square_size
+    # Find the nearest multiple of SQUARE_SIZE * PIXEL_SIZE meters + some extra space
+    new_width = (math.ceil(width / square_size) + 3) * square_size
 
-        # Adjust the extremes up and down to fit the new width, back into lat/long
-        # Get the difference between the new width and the old width
-        new_lat_diff = (new_width - lat_dist) / 2
-        new_long_diff = (new_width - long_dist) / 2
+    # Adjust the extremes up and down to fit the new width, back into lat/long
+    # Get the difference between the new width and the old width
+    new_lat_diff = (new_width - lat_dist) / 2
+    new_long_diff = (new_width - long_dist) / 2
 
-        r_earth = 6378137
+    r_earth = 6378137
 
-        # Adjust the extremes up and down to fit the new width, back into lat/long
-        lat_min = lat_min - (new_lat_diff / r_earth) * (180 / math.pi)
-        lat_max = lat_max + (new_lat_diff / r_earth) * (180 / math.pi)
-        long_min = long_min - (new_long_diff / r_earth) * (180 / math.pi)
-        long_max = long_max + (new_long_diff / r_earth) * (180 / math.pi)
+    # Adjust the extremes up and down to fit the new width, back into lat/long
+    lat_min = lat_min - (new_lat_diff / r_earth) * (180 / math.pi)
+    lat_max = lat_max + (new_lat_diff / r_earth) * (180 / math.pi)
+    long_min = long_min - (new_long_diff / r_earth) * (180 / math.pi)
+    long_max = long_max + (new_long_diff / r_earth) * (180 / math.pi)
 
-        # Update the extremes for the fire
-        extremes = (lat_min, lat_max, long_min, long_max)
-
-    return extremes
+    return (lat_min, lat_max, long_min, long_max)
 
 
 def extract_bands_from_tiff(tiff_path: str) -> np.ndarray:
@@ -103,7 +97,7 @@ def extract_bands_from_tiff(tiff_path: str) -> np.ndarray:
     ysize = ds.RasterYSize
 
     # Option 1: Direct CHW allocation (most memory efficient)
-    bands_array = np.zeros((num_bands, ysize, xsize), dtype=np.float32)
+    bands_array = np.zeros((num_bands, ysize, xsize), dtype=np.uint16)
 
     for band_idx in range(num_bands):
         band = ds.GetRasterBand(band_idx + 1)
@@ -132,6 +126,8 @@ def get_drawn_wkt(
 
     extremes = get_wkt_extremes([point for sublist in wkt_list for point in sublist])
 
+    print(f"Using extremes: {extremes}")
+
     # Create a hash for the WKT string to use as a directory name
     hash = hashlib.sha256(str(extremes).encode()).hexdigest()
     file_path = f"tmp/{hash}"
@@ -143,6 +139,8 @@ def get_drawn_wkt(
     date_end = date
 
     polygon = f"POLYGON(({extremes[2]:.8} {extremes[1]:.8}, {extremes[2]:.8} {extremes[0]:.8}, {extremes[3]:.8} {extremes[0]:.8}, {extremes[3]:.8} {extremes[1]:.8}, {extremes[2]:.8} {extremes[1]:.8}))"
+
+    print(polygon)
 
     delta = 36
 
@@ -201,20 +199,40 @@ def get_drawn_wkt(
                 else:
                     continue
 
-    if not os.path.isfile(f"tmp/downloads/{results[0].properties['sceneName']}.zip"):
-        results[0].download(path="tmp/downloads", session=session)
+    if not os.path.isfile(f"tmp/{results[0].properties['sceneName']}.zip"):
+        # Check if tmp/downloads directory exists, if not create it
+        if not os.path.isdir("tmp"):
+            os.makedirs("tmp")
+
+        results[0].download(path="tmp", session=session)
 
     generate_geocoded_grd(
         results[0].properties["sceneName"],
-        in_dir="tmp/downloads",
+        in_dir="tmp",
         out_dir=f"{file_path}/data",
     )
 
+    # Download DEM data for the area.
+    # We need to add a bit of padding to ensure we cover the entire area
+    dem = download_dem_from_bounds(
+        extremes[0] - 0.05,
+        extremes[1] + 0.05,
+        extremes[2] - 0.05,
+        extremes[3] + 0.05,
+        f"{file_path}/data",
+    )
+
+    tiff_files = [
+        f"{file_path}/data/{file}"
+        for file in os.listdir(f"{file_path}/data")
+        if (file.endswith(".tiff") or file.endswith(".tif")) and "merged" not in file
+    ]
+
     # Perform translation for 20x20 pixel sizes
-    for geotiff in os.walk(f"{file_path}/data"):
+    for geotiff in tiff_files:
         crop_and_scale_to_20x20(
-            input_tiff_path=geotiff[0],
-            output_tiff_path=geotiff[0],
+            input_tiff_path=geotiff,
+            output_tiff_path=geotiff,
             nw_latlon=(extremes[1], extremes[2]),
             sw_latlon=(extremes[0], extremes[2]),
             se_latlon=(extremes[0], extremes[3]),
@@ -223,24 +241,22 @@ def get_drawn_wkt(
             square_size=SQUARE_SIZE,
         )
 
-    # Merge all geotiffs into a single geotiff
-    # Get the SAR data files (.tiff)
-    sar_files = [
-        file
-        for file in os.listdir(f"{file_path}/data")
-        if file.endswith(".tiff")
-        and file != "merged.tiff"
-        and file != "merged_wkt.tiff"
-    ]
+    vv_band = [file for file in tiff_files if "vv" in file.lower()][0]
+    vh_band = [file for file in tiff_files if "vh" in file.lower()][0]
+    dem_band = [file for file in tiff_files if "dem" in file.lower()][0]
 
-    # Sort such that the vv band is first, then the vh band
-    if "vh" in sar_files[0]:
-        sar_files.reverse()
+    tiffs = [vv_band, vh_band, dem_band]
+
+    if len(tiff_files) != len(tiffs):
+        raise ValueError(
+            "Could not find all required bands (VV, VH, DEM). Found: "
+            + ", ".join(tiff_files)
+        )
 
     # Merge the files into a single geotiff
-    merge_geotiffs(sar_files, output_file=f"{file_path}/data/merged.tiff")
+    merge_geotiffs(tiffs, output_file=f"{file_path}/data/merged.tiff")
 
-    point_str = ", ".join([f"{coord[0]:.8} {coord[1]:.8}" for coord in wkt_list])
+    point_str = ", ".join([f"{coord[0]:.8} {coord[1]:.8}" for coord in wkt_list[0]])
     polygon_str = f"POLYGON(({point_str}))"
 
     input_file = f"{file_path}/data/merged.tiff"
@@ -248,12 +264,14 @@ def get_drawn_wkt(
         [polygon_str], input_file, output_file=f"{file_path}/data/merged_wkt.tiff"
     )
 
+    raise Exception("Debug stop")
+
     # Open the file and extract the band with the WKT drawn on it
     return extract_bands_from_tiff(f"{file_path}/data/merged_wkt.tiff")
 
 
 def expand_to_square(array, target_size=None):
-    height, width, bands = array.shape
+    bands, width, height = array.shape
     if target_size is None:
         max_dim = max(height, width)
         target_size = ((max_dim // SQUARE_SIZE) + 1) * SQUARE_SIZE
@@ -296,14 +314,14 @@ def run_inference(squares):
     """Run inference on the provided data and return the stitched results as a numpy array"""
     results = []
     model = SimpleFireCNN()
-    model.load_state_dict(
-        torch.load(f"{os.getcwd()}/assets/model/fire_predictor_model.pth")
-    )
+    model.load_state_dict(torch.load(f"{os.getcwd()}/fire_predictor_model.pth"))
     model.eval()
 
     with torch.no_grad():
         for square in squares:
             results.append(model(square).numpy())
+
+    return results
 
 
 def stitch_results(squares, square_size=SQUARE_SIZE):
@@ -318,13 +336,20 @@ def stitch_results(squares, square_size=SQUARE_SIZE):
     stitched_height = num_rows * square_size
     stitched_width = num_cols * square_size
 
-    stitched_array = np.zeros((stitched_height, stitched_width), dtype=squares[0].dtype)
+    stitched_array = np.zeros((stitched_height, stitched_width), dtype=np.float32)
+
+    print(f"{square_size=}")
 
     for idx, square in enumerate(squares):
         row = idx // num_cols
         col = idx % num_cols
         y_offset = row * square_size
         x_offset = col * square_size
+
+        print(f"Placing square {idx} at ({y_offset}, {x_offset})")
+        print(f"{square.shape=}")
+        print(f"{stitched_array.shape=}")
+
         stitched_array[
             y_offset : y_offset + square_size, x_offset : x_offset + square_size
         ] = square.squeeze() * 255
@@ -337,18 +362,27 @@ def process(
     password: str,
     wkt_list: list[list[tuple[float, float]]],
     date_str: str,
-) -> tuple[list[int], list[int]]:
-    data = get_drawn_wkt(username, password, date_str, wkt_list)
+) -> tuple[list[int], list[int], list[int]]:
+    data = get_drawn_wkt(
+        username=username, password=password, date_str=date_str, wkt_list=wkt_list
+    )
 
-    squares = cut_into_squares(expand_to_square(data))
+    print(f"Downloaded data shape: {data.shape}")
 
-    stitched_original: list[int] = [int(x) for x in stitch_results(data)]
+    squares = cut_into_squares(data)
 
     results = run_inference(squares)
 
-    stitched_results: list[int] = [int(x) for x in stitch_results(results)]
+    print(f"Got {len(results)} results from inference")
+    print(f"First result shape: {results[0].shape if results else 'N/A'}")
+
+    stitched_results: list[int] = [int(x) for x in stitch_results(results).flatten()]
 
     return (
-        stitched_original,
+        # Original mask (first band)
+        data[0].flatten().astype(int).tolist(),
+        # Results from inference
         stitched_results,
+        # Digital elevation model (4th band)
+        data[3].flatten().astype(int).tolist(),
     )
