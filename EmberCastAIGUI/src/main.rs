@@ -4,8 +4,8 @@ use dioxus::{
     document::{Style, Title},
     prelude::*,
 };
-use std::collections::HashMap;
-use tokio::process::Command;
+
+use serde_json::json;
 
 fn main() {
     dioxus::launch(App);
@@ -14,13 +14,26 @@ fn main() {
 pub static USERNAME: GlobalSignal<Option<String>> = GlobalSignal::new(|| None);
 pub static PASSWORD: GlobalSignal<Option<String>> = GlobalSignal::new(|| None);
 pub static WKT_STRING: GlobalSignal<Option<String>> = GlobalSignal::new(|| None);
-pub static OUTPUT_FILES: GlobalSignal<Vec<(String, String)>> = GlobalSignal::new(Vec::new);
+pub static OUTPUT_DATA: GlobalSignal<ProcessingState> =
+    GlobalSignal::new(|| ProcessingState::Empty);
 pub static STATUS_MESSAGE: GlobalSignal<Option<String>> = GlobalSignal::new(|| None);
 pub static INDEX: GlobalSignal<usize> = GlobalSignal::new(|| 0);
 
 pub static THROBBER: Asset = asset!("assets/throbber.svg");
 
 pub static API_ENDPOINT: &str = "http://127.0.0.1:8000";
+
+struct IntImage(Vec<u8>);
+
+enum ProcessingState {
+    Empty,
+    Processing(String), // Throbber or placeholder image location
+    Processed {
+        before: IntImage,
+        after: IntImage,
+        dem: IntImage,
+    },
+}
 
 #[component]
 pub fn App() -> Element {
@@ -150,7 +163,7 @@ fn UIinputs() -> Element {
                             .format(date_format_str)
                             .to_string();
                         println!("Formatted date: {}", formatted_date);
-                        OUTPUT_FILES.write().push((THROBBER.to_string(), String::new()));
+                        *OUTPUT_DATA.write() = ProcessingState::Processing(THROBBER.to_string());
                         spawn(async move {
                             run_model(
                                     &USERNAME().unwrap_or_default(),
@@ -183,109 +196,93 @@ fn Separator() -> Element {
 
 #[component]
 fn RenderImage() -> Element {
-    let files_count = OUTPUT_FILES.read().len();
-
     rsx! {
         div { style: "display: flex; flex-direction: column; justify-content: start; align-items: center; height: 100vh; width: 100%; overflow: hidden",
-            // Image navigation buttons
-            div { style: "display: flex; justify-content: center; align-items: center; align-self: start; width: 100%; gap: 10px; padding-bottom: 10px; padding-top: 10px;",
-                // Previous/Decrement button
-                button {
-                    disabled: *INDEX.read() == 0,
-                    onclick: move |_| {
-                        if *INDEX.read() > 0 {
-                            *INDEX.write() = *INDEX.read() - 1;
-                        }
-                    },
-                    "← Previous"
-                }
-
-                // Count
-                p { style: "margin: 0; padding: 2px;",
-                    if files_count > 0 {
-                        "{*INDEX.read() + 1}/{files_count}"
-                    } else {
-                        "0/0"
-                    }
-                }
-
-                // Next/Increment button
-                button {
-                    disabled: *INDEX.read() + 1 >= files_count,
-                    onclick: move |_| {
-                        if *INDEX.read() < files_count - 1 {
-                            *INDEX.write() = *INDEX.read() + 1;
-                        }
-                    },
-                    "Next →"
-                }
-            }
-
             // Render the selected image if any are available
-            if !OUTPUT_FILES.read().is_empty() {
-                if OUTPUT_FILES.read()[*INDEX.read()].0.ends_with("svg") {
-                    img {
-                        style: "padding-top: 30px; padding-bottom: 10px; align-self: center;",
-                        fill: "#fff",
-                        width: "200",
-                        height: "200",
-                        src: "{OUTPUT_FILES.read()[*INDEX.read()].0.clone()}",
-                    }
-                    p { style: "font-size: 24px;",
-                        if let Some(message) = STATUS_MESSAGE.read().clone() {
-                            "{message}"
-                        } else {
-                            "Processing..."
+            match *OUTPUT_DATA.read() {
+                ProcessingState::Empty => {
+                    rsx! { p { style: "font-size: 24px;", "No image available" } }
+                },
+                ProcessingState::Processing(ref img_path) => {
+                    rsx! {
+                        img {
+                            style: "padding-top: 30px; padding-bottom: 10px; align-self: center;",
+                            fill: "#fff",
+                            width: "200",
+                            height: "200",
+                            src: "{img_path}",
+                        }
+                        p { style: "font-size: 24px;",
+                            if let Some(message) = STATUS_MESSAGE.read().clone() {
+                                "{message}"
+                            } else {
+                                "Processing..."
+                            }
                         }
                     }
-                } else {
-                    {
-                        let before_image = load_image_from_file(OUTPUT_FILES.read()[*INDEX.read()].0.clone());
-                        let after_image = load_image_from_file(OUTPUT_FILES.read()[*INDEX.read()].1.clone());
-                        rsx! {
-                            // Display both images side by side
-                            div { style: "height: 100%; width: 100%; align-content: center; justify-content: space-around; display: flex; ",
-                            div {
-                                    p { style: "color: red", "Original" }
-                                    img {
-                                        src: "{before_image}",
-                                        alt: "Processed Image",
-                                        style: "max-width: 80%;
-                                        max-height: 100%;
-                                        border: 5px solid red;
-                                        object-fit: contain;",
-                                    }
-                                }
-                                div {
-                                    p { style: "color: green", "Prediction" }
-                                    img {
-                                        src: "{after_image}",
-                                        alt: "Processed Image",
-                                        style: "max-width: 80%;
-                                        max-height: 100%;
-                                        border: 5px solid green;
-                                        object-fit: contain;",
-                                    }
-                                }
+                },
+                ProcessingState::Processed { ref before, ref after, ref dem } => {
+                    rsx! {
+                        div { style: "display: flex; flex-direction: row; gap: 20px; justify-content: center; align-items: center; padding-top: 30px; padding-bottom: 10px;",
+                            div { style: "display: flex; flex-direction: column; gap: 10px; justify-content: center; align-items: center;",
+                                p { "Before" }
+                                BrightnessImage { brightness_data: before.0.clone(), color: (255, 0, 0), dem: dem.0.clone() }
+                            }
+                            div { style: "display: flex; flex-direction: column; gap: 10px; justify-content: center; align-items: center;",
+                                p { "After" }
+                                BrightnessImage { brightness_data: after.0.clone(), color: (255, 0, 0), dem: dem.0.clone() }
                             }
                         }
                     }
                 }
-            } else {
-                p { style: "font-size: 24px;", "No image available" }
             }
         }
     }
 }
 
-fn load_image_from_file(path: String) -> String {
-    use base64::prelude::*;
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+use image::{ImageBuffer, Luma};
 
-    let file_content = std::fs::read(path).expect("Failed to read image file");
+/// Converts grayscale brightness values to a PNG data URL
+fn brightness_to_data_url(brightness: &[u8], width: u32, height: u32) -> Option<String> {
+    // Create grayscale image from brightness values
+    let img = ImageBuffer::<Luma<u8>, _>::from_raw(width, height, brightness)?;
 
-    let encoded_image = BASE64_STANDARD.encode(file_content);
+    // Encode to PNG in memory
+    let mut png_bytes = Vec::new();
+    img.write_to(
+        &mut std::io::Cursor::new(&mut png_bytes),
+        image::ImageFormat::Png,
+    )
+    .ok()?;
 
-    format!("data:image/png;base64,{}", encoded_image)
+    Some(format!(
+        "data:image/png;base64,{}",
+        STANDARD.encode(&png_bytes)
+    ))
+}
+
+#[component]
+fn BrightnessImage(brightness_data: Vec<u8>, color: (u8, u8, u8), dem: Vec<u8>) -> Element {
+    let width = brightness_data.len().isqrt() as u32;
+    let height = width;
+
+    let data_url = use_memo(move || {
+        brightness_to_data_url(&brightness_data, width, height).unwrap_or_default()
+    });
+
+    rsx! {
+        if !data_url().is_empty() {
+            img {
+                src: "{data_url}",
+                alt: "Brightness map",
+                width: "{width}",
+                height: "{height}"
+            }
+        } else {
+            div { "Invalid image dimensions" }
+        }
+    }
 }
 
 /// Runs the model using the provided parameters.
@@ -301,48 +298,128 @@ fn load_image_from_file(path: String) -> String {
 /// This function does not return a value. It spawns a process and waits for it to finish.
 /// The output file path is stored in the `OUTPUT_FILE` global signal.
 async fn run_model(username: &str, password: &str, wkt_string: &str, date: &str) {
-    let wkt_stripped = wkt_string
-        .strip_prefix("POLYGON((")
-        .unwrap()
-        .strip_suffix("))")
-        .unwrap();
+    // Strip all of the possible prefix combinations from the WKT string
+    let wkt_prefix_stripped = strip_prefixes(wkt_string, &["POLYGON", " ", "((", " "]);
 
-    let wkt_strs: Vec<(&str, &str)> = wkt_stripped
-        .split(", ")
-        .map(|v| v.split_once(" ").unwrap())
-        .collect();
+    let wkt_stripped = strip_suffixes(wkt_prefix_stripped, &[" ", "))"]);
 
-    let wkt_list = format!(
-        "[ {} ]",
-        wkt_strs
-            .iter()
-            .map(|(x, y)| format!("[{}, {}]", x, y))
-            .collect::<Vec<String>>()
-            .join(", ")
-    );
+    println!("Stripped WKT: {}", wkt_stripped);
 
-    let form = HashMap::from([
-        ("username", username),
-        ("password", password),
-        ("wkt_points", &wkt_list),
-        ("date_str", date),
-    ]);
+    // Parse coordinates into actual numbers, not strings
+    let wkt_points: Vec<Vec<[f64; 2]>> = vec![
+        wkt_stripped
+            .split(", ")
+            .map(|v| {
+                let (x, y) = v.split_once(" ").unwrap();
+                [x.parse::<f64>().unwrap(), y.parse::<f64>().unwrap()]
+            })
+            .collect(),
+    ];
+
+    // Use serde_json for proper structure
+    let data = json!({
+        "username": username,
+        "password": password,
+        "wkt_points": wkt_points,
+        "date_str": date,
+    });
 
     let client = reqwest::Client::new();
 
-    let response = client.post(API_ENDPOINT).form(&form).send().await.unwrap();
+    let response = match client
+        .post(format!("{}/process_wkt", API_ENDPOINT))
+        .json(&data)
+        .send()
+        .await
+    {
+        Ok(resp) => resp,
+        Err(e) => {
+            *STATUS_MESSAGE.write() = Some(format!("Error: Failed to send request - {}", e));
+            return;
+        }
+    };
+
+    if response.status() != 200 {
+        *STATUS_MESSAGE.write() = Some(format!(
+            "Error: Received status code {}, {}",
+            response.status(),
+            response.text().await.unwrap_or_default()
+        ));
+        return;
+    }
 
     // Reset status message
     *STATUS_MESSAGE.write() = None;
 
-    // Drop trhobber
-    std::mem::drop(OUTPUT_FILES.write().pop());
+    let result = response.text().await.unwrap_or_default();
 
-    // Look for file in assets/tmp/{date}/output.png
-    if true {
-        OUTPUT_FILES.write().push((
-            format!("assets/tmp/{}/original.png", date),
-            format!("assets/tmp/{}/output.png", date),
-        ));
+    // Process result into two IntImage structs
+    // Turn response into json
+
+    let json = serde_json::from_str::<serde_json::Value>(&result).unwrap_or_default();
+
+    // Get "original" Vec<u8>
+
+    let original = json["original"]
+        .as_array()
+        .unwrap_or(&vec![])
+        .iter()
+        .map(|v| v.as_u64().unwrap_or(0) as u8)
+        .collect::<Vec<u8>>();
+
+    let results = json["results"]
+        .as_array()
+        .unwrap_or(&vec![])
+        .iter()
+        .map(|v| v.as_u64().unwrap_or(0) as u8)
+        .collect::<Vec<u8>>();
+
+    let dem = json["dem"]
+        .as_array()
+        .unwrap_or(&vec![])
+        .iter()
+        .map(|v| v.as_u64().unwrap_or(0) as u8)
+        .collect::<Vec<u8>>();
+
+    *OUTPUT_DATA.write() = ProcessingState::Processed {
+        before: IntImage(original),
+        after: IntImage(results),
+        dem: IntImage(dem),
+    };
+}
+
+fn strip_prefixes<'a>(string: &'a str, prefixes: &'a [&'a str]) -> &'a str {
+    let mut result = string;
+    for prefix in prefixes {
+        if result.starts_with(prefix) {
+            result = &result[prefix.len()..];
+        }
+    }
+    result
+}
+
+fn strip_suffixes<'a>(string: &'a str, suffixes: &'a [&'a str]) -> &'a str {
+    let mut result = string;
+    for suffix in suffixes {
+        if result.ends_with(suffix) {
+            result = &result[..result.len() - suffix.len()];
+        }
+    }
+    result
+}
+
+fn truncate_string_float(s: &str, decimal_places: usize) -> String {
+    if let Some(dot_index) = s.find('.') {
+        // Find the index where truncation should occur
+        let end_index = dot_index + 1 + decimal_places;
+
+        // Ensure end_index doesn't exceed the string length
+        if end_index >= s.len() {
+            s.to_string() // Return the original string if not enough decimal places
+        } else {
+            s[..end_index].to_string() // Slice and return the truncated string
+        }
+    } else {
+        s.to_string() // No decimal point found, return the original string
     }
 }

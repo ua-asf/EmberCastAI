@@ -11,8 +11,82 @@
       let
         pkgs = import nixpkgs { inherit system; };
 
-        python-env = pkgs.python3.withPackages (python-pkgs: [
+        python-with-overrides = pkgs.python3.override {
+          packageOverrides = final: prev: {
+            # asf-search
+            asf-search = final.buildPythonPackage rec {
+              pname = "asf_search";
+              version = "10.1.0";
+              format = "wheel";
+
+              src = pkgs.fetchPypi {
+                inherit pname version;
+                format = "wheel";
+                dist = "py3";
+                python = "py3";
+                abi = "none";
+                platform = "any";
+                hash = "sha256-bk3OBpy3MT8G551mEbPnDw+/GUX8eRzRfctC4KrNiWA=";
+              };
+
+              propagatedBuildInputs = with final; [
+                requests
+                python-dateutil
+                shapely
+                pytz
+                dateparser
+              ];
+
+              doCheck = false;
+            };
+
+            bmipy = final.buildPythonPackage rec {
+              pname = "bmipy";
+              version = "2.0.1";
+              format = "wheel";
+
+              src = pkgs.fetchPypi {
+                inherit pname version;
+                format = "wheel";
+                dist = "py3";
+                python = "py3";
+                abi = "none";
+                platform = "any";
+                hash = "sha256-5c68+LJjtV6KCUuEXr4MTBfhqMCdpDZvxZO3aewDqbk=";
+              };
+             doCheck = false;
+            };
+
+            bmi-topography = final.buildPythonPackage rec {
+              pname = "bmi_topography";
+              version = "0.9.0";
+              format = "wheel";
+
+              src = pkgs.fetchPypi {
+                inherit pname version;
+                format = "wheel";
+                dist = "py3";
+                python = "py3";
+                abi = "none";
+                platform = "any";
+                hash = "sha256-aMO50zSeyc/u9bodCNwnvCedy4vpY2l7swoF71rxvbg=";
+              };
+
+              propagatedBuildInputs = with final; [
+                numpy
+                requests
+                bmipy
+                rioxarray
+              ];
+
+              doCheck = false;
+            };
+          };
+        };
+
+        python-env = python-with-overrides.withPackages (python-pkgs: [
           python-pkgs.pip
+          python-pkgs.bmi-topography
           python-pkgs.setuptools
           python-pkgs.pandas
           python-pkgs.requests
@@ -53,6 +127,7 @@
                 mkdir -p $out/tmp/matplotlib
                 chmod -R 777 $out/tmp
                 cp ${./.}/*.py $out/app/
+                cp ${./.}/EmberCastAIGUI/assets/model/fire_predictor_model.pth $out/app/fire_predictor_model.pth
               '')
             ];
           };
@@ -83,6 +158,9 @@
       in {
         devShells.default = pkgs.mkShell {
           packages = [ python-env ];
+          shellHook = ''
+            source ./env.sh
+          '';
         };
         
         packages = {

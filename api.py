@@ -28,13 +28,19 @@ class ProcessWKTRequest(BaseModel):
     wkt_points: list[list[tuple[float, float]]]
 
 
-@app.post("process_wkt")
-async def process_wkt(req: ProcessWKTRequest):
-    original, results = process(
+class OriginalAndResults(BaseModel):
+    original: list[int]
+    results: list[int]
+    dem: list[int]
+
+
+@app.post("/process_wkt")
+async def process_wkt(req: ProcessWKTRequest) -> OriginalAndResults:
+    original, results, dem = process(
         req.username, req.password, req.wkt_points, req.date_str
     )
 
-    return {"original": original, "results": results}
+    return OriginalAndResults(original=original, results=results, dem=dem)
 
 
 class WKTExtremes(BaseModel):
