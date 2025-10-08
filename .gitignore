@@ -1,6 +1,7 @@
 /dataset
 /tmp
 /finalized_dataset
+/model/checkpoints
 env.sh
 *.txt
 .env
