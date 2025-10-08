@@ -1,5 +1,6 @@
 /dataset
 /tmp
+/finalized_dataset
 env.sh
 *.txt
 .env

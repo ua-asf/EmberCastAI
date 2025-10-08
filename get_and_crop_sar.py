@@ -20,7 +20,7 @@ from osgeo import gdal
 gdal.UseExceptions()
 
 # Dates used by the dataset are usually in the format YYYYMMDD
-date_format_str = "%Y-%m-%d-%H%M"
+from utils import date_format_str
 
 # The width/height of the pixels in the SAR data, in meters
 PIXEL_SIZE = 20
@@ -324,4 +324,3 @@ for fire, data in fires.items():
                     input_file,
                     output_file=f"{day}/{tiff.split('.')[0]}_wkt.tiff",
                 )
-

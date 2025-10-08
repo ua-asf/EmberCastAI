@@ -30,9 +30,6 @@ NORM_SCENE1_TO_SCENE2 = True  # Roughly match scene min/max's
 ARBITRARY_PIXEL_CUTOFF = 1700
 ARBITRARY_BRIGHT_PIXEL = 420
 
-#
-#####
-
 
 def utm_from_lon_lat(lon: float, lat: float) -> int:
     hemisphere = 32600 if lat >= 0 else 32700
@@ -49,15 +46,18 @@ def generate_geocoded_grd(granule, in_dir=None, out_dir=None):
     epsg_code = utm_from_lon_lat(centroid[0], centroid[1])
     print(f"Data is in UTM zone/EPSG {epsg_code}")
 
-    subset_product = in_dir or f"/tmp/{granule}"
+    found_existing = []
 
-    print(f"{subset_product}/{granule}")
+    for file in os.listdir(out_dir or "/tmp"):
+        if file.upper().endswith(".TIFF"):
+            granule_data = "-".join(granule.upper().split("_")[4:8])
 
-    if os.path.exists(subset_product):
-        for file in os.listdir(subset_product):
-            if file.endswith(".tiff"):
-                print(f"Reusing previously subsetted product {file}")
-                return
+            if granule_data in file.upper():
+                found_existing.append(file)
+
+    if len(found_existing) == 2:
+        print(f"Reusing previously subsetted products {found_existing}")
+        return found_existing
 
     print(f"Local fetching {granule} dataset")
     local_measure_path, zip_file = get_scene_data(granule)
@@ -88,7 +88,7 @@ def generate_geocoded_grd(granule, in_dir=None, out_dir=None):
             product,
             output_file=f"{out_dir}/{product_name}.tiff",
         )
-        product_paths.append((f"{out_dir}/{product_name}.tiff", epsg_code))
+        product_paths.append(f"{product_name}.tiff")
         print(
             f"Completed geocoding {product}, subsetting to {out_dir}/{product_name}.tiff"
         )
@@ -97,7 +97,7 @@ def generate_geocoded_grd(granule, in_dir=None, out_dir=None):
 
 
 def get_dataset_as_array(dataset):
-    if type(dataset) == str:
+    if type(dataset) is str:
         dataset = get_gdal_data(dataset)
 
     print("Reading Band")
