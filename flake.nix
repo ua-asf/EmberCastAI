@@ -40,6 +40,24 @@
               doCheck = false;
             };
 
+            asf-tools = final.buildPythonPackage rec {
+              pname = "asf_tools";
+              version = "0.8.3";
+              format = "wheel";
+
+              src = pkgs.fetchPypi {
+                inherit pname version;
+                format = "wheel";
+                dist = "py3";
+                python = "py3";
+                abi = "none";
+                platform = "any";
+                hash = "sha256-cTeWyH+bQKxXubj9oNyBFPFlecL5+mlRp0B8LQojZvA=";
+              };
+
+              doCheck = false;
+            };
+
             bmipy = final.buildPythonPackage rec {
               pname = "bmipy";
               version = "2.0.1";
@@ -98,9 +116,12 @@
           python-pkgs.tqdm
           python-pkgs.python-dotenv
           python-pkgs.asf-search
+          python-pkgs.asf-tools
           python-pkgs.tenacity
+          python-pkgs.geopandas
           python-pkgs.boto3
           python-pkgs.fiona
+          python-pkgs.owslib
           python-pkgs.pyproj
           python-pkgs.scikit-learn
           python-pkgs.scikit-image

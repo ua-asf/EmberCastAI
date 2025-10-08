@@ -15,7 +15,7 @@ def download_dem_from_bounds(
     lon_max: float,
     output_dir: str,
     dem_type: str = "NASADEM",
-) -> str:
+):
     """
     Download DEM data for a fire area using bmi-topography.
 

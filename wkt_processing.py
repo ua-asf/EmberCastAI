@@ -23,10 +23,10 @@ from shapely.geometry import Polygon
 
 from model import SimpleFireCNN
 
-gdal.UseExceptions()
-
 # Define the date format string
-date_format_str = "%Y-%m-%dT%H:%M:%S.%f"
+from utils import date_format_str
+
+gdal.UseExceptions()
 
 # The width/height of the pixels in the SAR data, in meters
 PIXEL_SIZE = 20
@@ -38,51 +38,272 @@ SQUARE_SIZE = 100
 def get_wkt_extremes(
     wkt_list: list[tuple[float, float]],
 ) -> tuple[float, float, float, float]:
-    lat_min = 90
-    lat_max = -90
-    long_min = 180
-    long_max = -180
+    """
+    Calculate a rectilinear bounding box around WKT points, padded to a grid multiple.
 
-    for long, lat in wkt_list:
-        # Update the extremes if necessary
-        if lat < lat_min:
-            lat_min = lat
-        if lat > lat_max:
-            lat_max = lat
-        if long < long_min:
-            long_min = long
-        if long > long_max:
-            long_max = long
+    Args:
+        wkt_list: List of (longitude, latitude) coordinate pairs
 
-    # Scale the extremes to be a multiple of SQUARE_SIZE * PIXEL_SIZE meters, in a square
+    Returns:
+        Tuple of (lat_min, lat_max, long_min, long_max) forming a square in meters
+    """
+    # Find initial bounding box and center
+    longitudes, latitudes = zip(*wkt_list)
+    lat_center = (min(latitudes) + max(latitudes)) / 2
+    long_center = (min(longitudes) + max(longitudes)) / 2
 
-    # Get the distance of latitude and longitude
-    lat_dist = haversine_distance(lat_min, long_min, lat_max, long_min)
-    long_dist = haversine_distance(lat_min, long_min, lat_min, long_max)
+    # Calculate current spans in meters
+    lat_dist = haversine_distance(
+        min(latitudes), long_center, max(latitudes), long_center
+    )
+    long_dist = haversine_distance(
+        lat_center, min(longitudes), lat_center, max(longitudes)
+    )
 
-    # Get the larger of the two differences
-    width = max(lat_dist, long_dist)
-
-    # Get the square size in meters
-    square_size = SQUARE_SIZE * PIXEL_SIZE
-
-    # Find the nearest multiple of SQUARE_SIZE * PIXEL_SIZE meters + some extra space
-    new_width = (math.ceil(width / square_size) + 3) * square_size
-
-    # Adjust the extremes up and down to fit the new width, back into lat/long
-    # Get the difference between the new width and the old width
-    new_lat_diff = (new_width - lat_dist) / 2
-    new_long_diff = (new_width - long_dist) / 2
+    # Target size: max dimension rounded up to grid + padding
+    grid_size = SQUARE_SIZE * PIXEL_SIZE
+    target_long = (math.ceil(long_dist / grid_size) + 3) * grid_size
+    target_lat = (math.ceil(lat_dist / grid_size) + 3) * grid_size
 
     r_earth = 6378137
+    lat_center_rad = math.radians(lat_center)
 
-    # Adjust the extremes up and down to fit the new width, back into lat/long
-    lat_min = lat_min - (new_lat_diff / r_earth) * (180 / math.pi)
-    lat_max = lat_max + (new_lat_diff / r_earth) * (180 / math.pi)
-    long_min = long_min - (new_long_diff / r_earth) * (180 / math.pi)
-    long_max = long_max + (new_long_diff / r_earth) * (180 / math.pi)
+    # Set latitude dimension (more stable due to constant conversion factor)
+    lat_delta = math.degrees(target_lat / 2 / r_earth)
+    lat_min = lat_center - lat_delta
+    lat_max = lat_center + lat_delta
 
-    return (lat_min, lat_max, long_min, long_max)
+    # Calculate longitude delta that gives the same measured distance
+    long_delta = math.degrees((target_long / 2) / (r_earth * math.cos(lat_center_rad)))
+
+    return (
+        lat_min,
+        lat_max,
+        long_center - long_delta,
+        long_center + long_delta,
+    )
+
+
+def get_sar_over_area(
+    username: str,
+    password: str,
+    date_str: str,
+    polygon: list[tuple[float, float]],
+    file_path: str,
+) -> tuple[str, str]:
+    """
+    Gets SAR data over the given polygon and date, processing it as needed.
+    Will mosaic multiple scenes if required.
+
+    Inputs:
+        username: ASF username
+        password: ASF password
+        date_str: Date string in YYYY-MM-DD format
+        polygon: List of (longitude, latitude) tuples defining the polygon
+    Outputs:
+        List of paths to generated GRD files
+        Format: `tuple[VV_BAND, VH_BAND]`
+    """
+
+    session = asf.ASFSession()
+
+    # Authenticate the session
+    session.auth_with_creds(username=username, password=password)
+
+    date = datetime.strptime(os.path.basename(date_str), date_format_str)
+
+    date_end = date
+
+    delta = 15
+
+    date_start = date - timedelta(days=delta)
+
+    polygon_str = (
+        f"POLYGON(({', '.join([f'{coord[0]} {coord[1]}' for coord in polygon])}))"
+    )
+
+    options = {
+        "dataset": "SENTINEL-1",
+        "intersectsWith": polygon_str,
+        "polarization": ["VV+VH"],
+        "processingLevel": "GRD_HD",
+        "start": date_start.strftime(date_format_str),
+        "end": date_end.strftime(date_format_str),
+        "maxResults": 1000,
+    }
+
+    results = []
+    final_results = []
+
+    fire_polygon = Polygon(polygon)
+
+    while len(results) == 0:
+        # Extend the search window and add new results.
+        # We do this to save querying for the same date range multiple times,
+        # say we miss any relevant data the first time, Oct-Nov. We save that,
+        # then query again for Nov-Jan.
+        results.extend(asf.geo_search(**options))
+
+        delta += delta
+        options["end"] = options["start"]
+        options["start"] = (date - timedelta(days=delta)).strftime(date_format_str)
+
+        if delta > 1000:
+            raise ValueError(f"No data found for fire on {date}")
+
+        if len(results) > 0:
+            # Sort the data on the time of acquisition, newest first
+            results.sort(
+                key=lambda x: datetime.strptime(
+                    x.properties["stopTime"], "%Y-%m-%dT%H:%M:%SZ"
+                ),
+                reverse=True,
+            )
+
+        # === Step 1: Check if a polygon covers the area of the fire polygon ===
+
+        for result in results:
+            candidate_polygon = Polygon(result.geometry["coordinates"][0])
+            if candidate_polygon.contains_properly(fire_polygon):
+                final_results = [result]
+                break
+
+        # Check if we found a suitable polygon
+        if len(final_results) == 1:
+            break
+
+        # === Step 2: Mosacking. Search for polygons that combine to cover the fire polygon ===
+
+        # Check again if we found a suitable set of polygons
+        if len(final_results) > 0:
+            break
+
+        ascending_granules = get_containing_flight_dir_polygon(
+            results, "ASCENDING", fire_polygon
+        )
+        descending_granules = get_containing_flight_dir_polygon(
+            results, "DESCENDING", fire_polygon
+        )
+
+        if len(ascending_granules) == 0 and len(descending_granules) == 0:
+            print(
+                f"No suitable mosaic found with {len(results)} granules, expanding search"
+            )
+        else:
+            # Return whichever list has a shorter length
+            if len(ascending_granules) > len(descending_granules):
+                final_results = descending_granules
+            else:
+                final_results = ascending_granules
+
+        if len(final_results) > 0:
+            break
+
+        # === Step 3: No mosaic found, repeat with larger date range ===
+        results = []
+
+    generated_grds = []
+
+    print(
+        f"Final results: {len(final_results)} granules: {[result.properties['sceneName'] for result in final_results]}"
+    )
+
+    for result in final_results:
+        if not os.path.isfile(f"tmp/{result.properties['sceneName']}.zip"):
+            # Check if tmp/downloads directory exists, if not create it
+            if not os.path.isdir("tmp"):
+                os.makedirs("tmp")
+
+            result.download(path="tmp", session=session)
+
+        generated_grds.append(
+            generate_geocoded_grd(
+                result.properties["sceneName"],
+                in_dir="tmp",
+                # Output to tmp so we can cache the GRD files for later use
+                out_dir="tmp",
+            )
+        )
+
+    # Flatten the list of tuples into a single list
+    generated_grds = [grd for pair in generated_grds for grd in pair]
+
+    # Append file path to each generated GRD file
+    generated_grds = [f"tmp/{grd}" for grd in generated_grds]
+
+    print(f"Generated {len(generated_grds)} GRD files: {generated_grds}")
+
+    if len(generated_grds) > 2:
+        return mosaic_sar_bands(
+            generated_grds, out_dir=f"{file_path}/data", out_file_name="mosaic"
+        )
+    elif len(generated_grds) == 2:
+        return (generated_grds[0], generated_grds[1])
+    else:
+        raise ValueError(f"Unexpected number of GRD files: {len(generated_grds)}")
+
+
+def get_containing_flight_dir_polygon(results, direction, fire_polygon):
+    candidate_polygon = Polygon()
+    mosaic_results = []
+
+    for result in results:
+        if not result.properties["flightDirection"] == direction:
+            continue
+
+        new_polygon = Polygon(result.geometry["coordinates"][0])
+
+        intersection = candidate_polygon.intersection(new_polygon)
+
+        # Skip if the new polygon has more than a certain percentage overlap with the existing candidate polygon
+        if candidate_polygon.area != 0 and intersection.area / new_polygon.area > 0.3:
+            continue
+
+        candidate_polygon = candidate_polygon.union(new_polygon)
+        mosaic_results.append(result)
+
+        if candidate_polygon.contains_properly(fire_polygon):
+            break
+
+    if candidate_polygon.contains_properly(fire_polygon):
+        return mosaic_results
+    else:
+        return []
+
+
+def mosaic_sar_bands(
+    input_files: list[str], out_dir: str, out_file_name: str
+) -> tuple[str, str]:
+    """
+    Takes a set of VV and VH files and creates a mosaic for each polarization.
+    """
+    vv_files = [f for f in input_files if "vv" in f.lower()]
+    vh_files = [f for f in input_files if "vh" in f.lower()]
+
+    mosaic_geotiffs(vv_files, dst_path=f"{out_dir}/{out_file_name}_vv.tiff")
+    mosaic_geotiffs(vh_files, dst_path=f"{out_dir}/{out_file_name}_vh.tiff")
+
+    return (f"{out_dir}/{out_file_name}_vv.tiff", f"{out_dir}/{out_file_name}_vh.tiff")
+
+
+from osgeo import gdal
+
+
+def mosaic_geotiffs(tiffs: list[str], dst_path: str):
+    options = gdal.WarpOptions(
+        format="GTiff",
+        outputType=gdal.GDT_UInt16,
+        multithread=True,
+        creationOptions=["COMPRESS=LZW", "TILED=YES"],
+    )
+
+    print(f"\n\n\n\n\n\n\nMosaicking {len(tiffs)} files into {dst_path}\n\n\n\n\n\n")
+
+    gdal.Warp(
+        dst_path,
+        tiffs,
+        options=options,
+    )
 
 
 def extract_bands_from_tiff(tiff_path: str) -> np.ndarray:
@@ -107,125 +328,57 @@ def extract_bands_from_tiff(tiff_path: str) -> np.ndarray:
     return bands_array
 
 
+def get_hash(extremes):
+    return hashlib.sha256(str(extremes).encode()).hexdigest()
+
+
 def get_drawn_wkt(
     username: str,
     password: str,
     date_str: str,
     wkt_list: list[list[tuple[float, float]]],
+    extremes: tuple[float, float, float, float],
+    file_path: str,
 ) -> np.ndarray:
     """
     Downloads SAR data for the given WKT polygons and date, processes it, and draws the WKT ontop of an np.
     """
 
-    session = asf.ASFSession()
-
-    # Authenticate the session
-    session.auth_with_creds(username=username, password=password)
-
-    date = datetime.strptime(os.path.basename(date_str), date_format_str)
-
-    extremes = get_wkt_extremes([point for sublist in wkt_list for point in sublist])
-
-    print(f"Using extremes: {extremes}")
-
-    # Create a hash for the WKT string to use as a directory name
-    hash = hashlib.sha256(str(extremes).encode()).hexdigest()
-    file_path = f"tmp/{hash}"
-
     # Create assets/tmp/{wkt_string}/data directory if it doesn't exist
     if not os.path.isdir(f"{file_path}/data"):
         os.makedirs(f"{file_path}/data")
 
-    date_end = date
+    # Make a square polygon from the extremes - add padding so the SAR data covers the entire area
+    polygon = [
+        (extremes[2] - 0.1, extremes[1] + 0.1),
+        (extremes[2] - 0.1, extremes[0] - 0.1),
+        (extremes[3] + 0.1, extremes[0] - 0.1),
+        (extremes[3] + 0.1, extremes[1] + 0.1),
+        (extremes[2] - 0.1, extremes[1] + 0.1),
+    ]
 
-    polygon = f"POLYGON(({extremes[2]:.8} {extremes[1]:.8}, {extremes[2]:.8} {extremes[0]:.8}, {extremes[3]:.8} {extremes[0]:.8}, {extremes[3]:.8} {extremes[1]:.8}, {extremes[2]:.8} {extremes[1]:.8}))"
-
-    print(polygon)
-
-    delta = 36
-
-    date_start = date - timedelta(days=delta)
-
-    options = {
-        "dataset": "SENTINEL-1",
-        "intersectsWith": polygon,
-        "polarization": ["VV+VH"],
-        "processingLevel": "GRD_HD",
-        "start": date_start.strftime(date_format_str),
-        "end": date_end.strftime(date_format_str),
-    }
-
-    results = []
-
-    while len(results) == 0:
-        results = asf.geo_search(**options)
-
-        delta += delta
-        options["end"] = options["start"]
-        options["start"] = (date - timedelta(days=delta)).strftime(date_format_str)
-
-        if delta > 1000:
-            raise ValueError(f"No data found for fire on {date}")
-
-        if len(results) > 0:
-            # Sort by date
-            results.sort(
-                key=lambda x: datetime.strptime(
-                    x.properties["stopTime"], "%Y-%m-%dT%H:%M:%S%fZ"
-                )
-            )
-
-            # Ensure the polygon is within the bounds of the fire
-            while results:
-                # Get the first result
-                result = results.pop()
-                candidate = result.geometry["coordinates"][0]
-
-                target = polygon.split("((")[1].split("))")[0].split(", ")
-                # Split the coordinates into lat/long
-                target = [coord.split(" ") for coord in target]
-                # Convert the coordinates to floats
-                target = [[float(coord[0]), float(coord[1])] for coord in target]
-
-                # Convert the coordinates to a polygon
-                candidate_polygon = Polygon(candidate)
-                fire_polygon = Polygon(target)
-
-                # Check if the coordinates are within the bounds of the fire
-                # The order goes [0] = top left, [1] = top right, [2] = bottom right, [3] = bottom left
-                if candidate_polygon.contains_properly(fire_polygon):
-                    results = [result]
-                    break
-                else:
-                    continue
-
-    if not os.path.isfile(f"tmp/{results[0].properties['sceneName']}.zip"):
-        # Check if tmp/downloads directory exists, if not create it
-        if not os.path.isdir("tmp"):
-            os.makedirs("tmp")
-
-        results[0].download(path="tmp", session=session)
-
-    generate_geocoded_grd(
-        results[0].properties["sceneName"],
-        in_dir="tmp",
-        out_dir=f"{file_path}/data",
+    results = get_sar_over_area(
+        username=username,
+        password=password,
+        date_str=date_str,
+        polygon=polygon,
+        file_path=file_path,
     )
 
     # Download DEM data for the area.
     # We need to add a bit of padding to ensure we cover the entire area
-    dem = download_dem_from_bounds(
-        extremes[0] - 0.05,
-        extremes[1] + 0.05,
-        extremes[2] - 0.05,
-        extremes[3] + 0.05,
-        f"{file_path}/data",
-    )
+    # dem = download_dem_from_bounds(
+    # extremes[0] - 0.05,
+    # extremes[1] + 0.05,
+    # extremes[2] - 0.05,
+    # extremes[3] + 0.05,
+    # f"{file_path}/data",
+    # )
 
     tiff_files = [
-        f"{file_path}/data/{file}"
-        for file in os.listdir(f"{file_path}/data")
-        if (file.endswith(".tiff") or file.endswith(".tif")) and "merged" not in file
+        results[0],  # VV band
+        results[1],  # VH band
+        # dem       , # DEM
     ]
 
     # Perform translation for 20x20 pixel sizes
@@ -241,47 +394,23 @@ def get_drawn_wkt(
             square_size=SQUARE_SIZE,
         )
 
-    vv_band = [file for file in tiff_files if "vv" in file.lower()][0]
-    vh_band = [file for file in tiff_files if "vh" in file.lower()][0]
-    dem_band = [file for file in tiff_files if "dem" in file.lower()][0]
-
-    tiffs = [vv_band, vh_band, dem_band]
-
-    if len(tiff_files) != len(tiffs):
-        raise ValueError(
-            "Could not find all required bands (VV, VH, DEM). Found: "
-            + ", ".join(tiff_files)
-        )
-
     # Merge the files into a single geotiff
-    merge_geotiffs(tiffs, output_file=f"{file_path}/data/merged.tiff")
+    merge_geotiffs(tiff_files, output_file=f"{file_path}/data/merged.tiff")
 
-    point_str = ", ".join([f"{coord[0]:.8} {coord[1]:.8}" for coord in wkt_list[0]])
-    polygon_str = f"POLYGON(({point_str}))"
+    wkt_strs = []
+    for wkt in wkt_list:
+        point_str = ", ".join([f"{coord[0]:.8} {coord[1]:.8}" for coord in wkt])
+        wkt_strs.append(f"POLYGON(({point_str}))")
 
     input_file = f"{file_path}/data/merged.tiff"
     draw_wkt_to_geotiff(
-        [polygon_str], input_file, output_file=f"{file_path}/data/merged_wkt.tiff"
+        wkt_strs, input_file, output_file=f"{file_path}/data/merged_wkt.tiff"
     )
 
-    raise Exception("Debug stop")
+    # raise Exception("Debug stop")
 
     # Open the file and extract the band with the WKT drawn on it
     return extract_bands_from_tiff(f"{file_path}/data/merged_wkt.tiff")
-
-
-def expand_to_square(array, target_size=None):
-    bands, width, height = array.shape
-    if target_size is None:
-        max_dim = max(height, width)
-        target_size = ((max_dim // SQUARE_SIZE) + 1) * SQUARE_SIZE
-        if target_size % 2 != 0:
-            target_size += SQUARE_SIZE
-    square_array = np.zeros((target_size, target_size, bands), dtype=array.dtype)
-    y_offset = (target_size - height) // 2
-    x_offset = (target_size - width) // 2
-    square_array[y_offset : y_offset + height, x_offset : x_offset + width] = array
-    return square_array
 
 
 def cut_into_squares(array, square_size=SQUARE_SIZE):
@@ -307,7 +436,11 @@ def cut_into_squares(array, square_size=SQUARE_SIZE):
             squares.append(square)
 
     # Add batch dimension: (num_patches, channels, H, W) -> (num_patches, 1, channels, H, W)
-    return torch.from_numpy(np.array(squares)).unsqueeze(1)
+    return (
+        torch.from_numpy(np.array(squares)).unsqueeze(1),
+        num_squares_x,
+        num_squares_y,
+    )
 
 
 def run_inference(squares):
@@ -364,7 +497,12 @@ def process(
     date_str: str,
 ) -> tuple[list[int], list[int], list[int]]:
     data = get_drawn_wkt(
-        username=username, password=password, date_str=date_str, wkt_list=wkt_list
+        username=username,
+        password=password,
+        date_str=date_str,
+        wkt_list=wkt_list,
+        extremes=get_wkt_extremes([pt for sublist in wkt_list for pt in sublist]),
+        file_path=f"tmp/{get_hash(wkt_list)}",
     )
 
     print(f"Downloaded data shape: {data.shape}")
@@ -386,3 +524,4 @@ def process(
         # Digital elevation model (4th band)
         data[3].flatten().astype(int).tolist(),
     )
+

@@ -44,7 +44,7 @@ def geocode_geotiff(scene, poly, dataset, output_file=None, width=None):
     if width:
         params["width"] = width
 
-    if type(dataset) == str:
+    if type(dataset) is str:
         pixel_sizes = get_image_pixel_size(dataset)
         params["xRes"] = pixel_sizes["x_size"]
         params["yRes"] = pixel_sizes["y_size"]
@@ -202,6 +202,8 @@ def crop_and_scale_to_20x20(
         outputBounds=(min_x, min_y, max_x, max_y),
         xRes=pixel_size,
         yRes=pixel_size,
+        height=height_px,
+        width=width_px,
         resampleAlg=gdal.GRA_Bilinear,
     )
 
@@ -222,7 +224,7 @@ def haversine_distance(lat1, lon1, lat2, lon2):
     Returns:
         The distance in meters.
     """
-    radius = 6371000  # Earth radius in meters
+    radius = 6378137  # Earth radius in meters
 
     lat1_rad = math.radians(lat1)
     lon1_rad = math.radians(lon1)
