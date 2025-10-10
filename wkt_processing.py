@@ -537,7 +537,7 @@ def stitch_results(squares, num_squares_x, num_squares_y, square_size=SQUARE_SIZ
 
     for idx, square in enumerate(squares):
         row = idx // num_squares_x
-        col = idx % num_squares_y
+        col = idx % num_squares_x
         y_offset = row * square_size
         x_offset = col * square_size
 

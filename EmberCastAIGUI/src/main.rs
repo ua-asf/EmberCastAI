@@ -191,7 +191,7 @@ fn Separator() -> Element {
 #[component]
 fn RenderImage() -> Element {
     rsx! {
-        div { style: "display: flex; flex-direction: column; justify-content: start; align-items: center; height: 100vh; width: 100%; overflow: hidden",
+        div { style: "display: flex; flex-direction: column; justify-content: start; align-items: center; height: 100vh; width: 100vw; overflow: hidden",
             // Render the selected image if any are available
             match *OUTPUT_DATA.read() {
                 ProcessingState::Empty => {
@@ -217,13 +217,13 @@ fn RenderImage() -> Element {
                 },
                 ProcessingState::Processed { ref before, ref after } => {
                     rsx! {
-                        div { style: "display: flex; flex-direction: row; gap: 20px; justify-content: center; align-items: center; padding-top: 30px; padding-bottom: 10px;",
-                            div { style: "display: flex; flex-direction: column; gap: 10px; justify-content: center; align-items: center;",
-                                p { style: "color: red", "Before" }
+                        div { style: "display: flex; flex-direction: row; gap: 20px; justify-content: center; align-items: center; padding-top: 10px; padding-bottom: 10px; width: 100%; max-height: 90vh",
+                            div { style: "display: flex; flex-direction: column; gap: 10px; justify-content: center; align-items: center; width: 40vw; height: 90vh;",
+                                p { style: "color: red; font-size: 20px", "Before" }
                                 RgbImageToBase64 { img: before.clone() }
                             }
-                            div { style: "display: flex; flex-direction: column; gap: 10px; justify-content: center; align-items: center;",
-                                p { style: "color: green", "After" }
+                            div { style: "display: flex; flex-direction: column; gap: 10px; justify-content: center; align-items: center; width: 40vw; height: 90vh;",
+                                p { style: "color: green; font-size: 20px", "After" }
                                 RgbImageToBase64 { img: after.clone() }
                             }
                         }
@@ -249,7 +249,7 @@ fn RgbImageToBase64(img: RgbImage) -> Element {
 
     rsx! {
         img {
-            style: "border: 2px solid white; width: 100%, height: 100%, max-width: 40vw; max-height: 60vh;",
+            style: "border: 2px solid white; width: 100%; height: 100%, object-fit: contain; display: block;",
             src: "{data_url}",
             alt: "Brightness map",
         }
@@ -347,7 +347,8 @@ async fn run_model(username: &str, password: &str, wkt_string: &str, date: &str)
         .as_array()
         .unwrap_or(&vec![])
         .iter()
-        .map(|v| v.as_u64().unwrap_or(0) as u8)
+        // Darken the DEM a bit for better visibility
+        .map(|v| v.as_u64().unwrap_or(0) as u8 / 2)
         .collect::<Vec<u8>>();
 
     let dimensions = json["dims"]
@@ -356,6 +357,11 @@ async fn run_model(username: &str, password: &str, wkt_string: &str, date: &str)
         .iter()
         .map(|v| v.as_u64().unwrap_or(0) as usize)
         .collect::<Vec<usize>>();
+
+    println!("Dimensions: {:?}", dimensions);
+    println!("Original length: {}", original.len());
+    println!("Results length: {}", results.len());
+    println!("DEM length: {}", dem.len());
 
     let dem_pixels = dem.iter().flat_map(|v| [*v, *v, *v]).collect::<Vec<u8>>();
 
@@ -376,23 +382,35 @@ async fn run_model(username: &str, password: &str, wkt_string: &str, date: &str)
 
     overlay_non_black(
         &mut before_final,
-        &RgbImage::from_vec(dimensions[0] as u32, dimensions[1] as u32, before_rgb).unwrap(),
+        &RgbImage::from_vec(
+            dimensions[0] as u32,
+            dimensions[1] as u32,
+            before_rgb.clone(),
+        )
+        .unwrap(),
     );
 
-    let mut after_final = dem_image.clone();
+    let mut after_final = dem_image;
 
     let after_rgb = results
         .iter()
         .flat_map(|v| {
             let pixel_brightness = *v as f32 / 255.0;
-            let r = 255.0 * pixel_brightness;
-            [r as u8, 0, 0]
+            let p = 255.0 * pixel_brightness;
+            [0, p as u8, 0]
         })
         .collect::<Vec<u8>>();
 
+    // Add the model's predictions in red
     overlay_non_black(
         &mut after_final,
         &RgbImage::from_vec(dimensions[0] as u32, dimensions[1] as u32, after_rgb).unwrap(),
+    );
+
+    // Add the original data in yellow
+    overlay_non_black(
+        &mut after_final,
+        &RgbImage::from_vec(dimensions[0] as u32, dimensions[1] as u32, before_rgb).unwrap(),
     );
 
     *OUTPUT_DATA.write() = ProcessingState::Processed {
@@ -410,17 +428,20 @@ fn overlay_non_black(dst: &mut RgbImage, src: &RgbImage) {
         "Images must be same size"
     );
 
-    let mut pixel_counter = 0;
-
     for (x, y, &pixel) in src.enumerate_pixels() {
         if pixel != Rgb([0, 0, 0]) {
-            dst.put_pixel(x, y, pixel);
-            pixel_counter += 1;
+            // Get source pixel data
+            let mut new_pixel = pixel;
+
+            let dst_pixel = dst.get_pixel(x, y);
+
+            new_pixel[0] = (new_pixel[0] as u16 + dst_pixel[0] as u16).min(255) as u8;
+            new_pixel[1] = (new_pixel[1] as u16 + dst_pixel[1] as u16).min(255) as u8;
+            new_pixel[2] = (new_pixel[2] as u16 + dst_pixel[2] as u16).min(255) as u8;
+
+            dst.put_pixel(x, y, new_pixel);
         }
     }
-
-    println!("Overlayed {} pixels", pixel_counter);
-    println!("Original number of pixels: {}", src.width() * src.height());
 }
 
 fn strip_prefixes<'a>(string: &'a str, prefixes: &'a [&'a str]) -> &'a str {
