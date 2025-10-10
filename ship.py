@@ -37,14 +37,11 @@ def utm_from_lon_lat(lon: float, lat: float) -> int:
     return hemisphere + zone
 
 
-def generate_geocoded_grd(granule, in_dir=None, out_dir=None):
-    print(f"Loading raster data for dataset {granule}")
-    print("Querying CMR for scene info")
-    _, _, _, epsg_code_poly, _ = get_scene_metadata(granule)
-
-    centroid = epsg_code_poly.centroid.coords[0]
-    epsg_code = utm_from_lon_lat(centroid[0], centroid[1])
-    print(f"Data is in UTM zone/EPSG {epsg_code}")
+def generate_geocoded_grd(granule, epsg_code_poly=None, in_dir=None, out_dir=None):
+    if not epsg_code_poly:
+        print(f"Loading raster data for dataset {granule}")
+        print("Querying CMR for scene info")
+        _, _, _, epsg_code_poly, _ = get_scene_metadata(granule)
 
     found_existing = []
 

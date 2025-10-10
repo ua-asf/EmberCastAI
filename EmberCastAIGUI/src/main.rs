@@ -23,16 +23,10 @@ pub static THROBBER: Asset = asset!("assets/throbber.svg");
 
 pub static API_ENDPOINT: &str = "http://127.0.0.1:8000";
 
-struct IntImage(Vec<u8>);
-
 enum ProcessingState {
     Empty,
     Processing(String), // Throbber or placeholder image location
-    Processed {
-        before: IntImage,
-        after: IntImage,
-        dem: IntImage,
-    },
+    Processed { before: RgbImage, after: RgbImage },
 }
 
 #[component]
@@ -158,7 +152,7 @@ fn UIinputs() -> Element {
                             return;
                         }
                         button_clickable.set(false);
-                        let date_format_str = "%Y-%m-%dT%H:%M:%S.%3f";
+                        let date_format_str = "%Y-%m-%dT%H:%M:%S";
                         let formatted_date: String = chrono::Local::now()
                             .format(date_format_str)
                             .to_string();
@@ -221,16 +215,16 @@ fn RenderImage() -> Element {
                         }
                     }
                 },
-                ProcessingState::Processed { ref before, ref after, ref dem } => {
+                ProcessingState::Processed { ref before, ref after } => {
                     rsx! {
                         div { style: "display: flex; flex-direction: row; gap: 20px; justify-content: center; align-items: center; padding-top: 30px; padding-bottom: 10px;",
                             div { style: "display: flex; flex-direction: column; gap: 10px; justify-content: center; align-items: center;",
-                                p { "Before" }
-                                BrightnessImage { brightness_data: before.0.clone(), color: (255, 0, 0), dem: dem.0.clone() }
+                                p { style: "color: red", "Before" }
+                                RgbImageToBase64 { img: before.clone() }
                             }
                             div { style: "display: flex; flex-direction: column; gap: 10px; justify-content: center; align-items: center;",
-                                p { "After" }
-                                BrightnessImage { brightness_data: after.0.clone(), color: (255, 0, 0), dem: dem.0.clone() }
+                                p { style: "color: green", "After" }
+                                RgbImageToBase64 { img: after.clone() }
                             }
                         }
                     }
@@ -241,46 +235,23 @@ fn RenderImage() -> Element {
 }
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
-use image::{ImageBuffer, Luma};
-
-/// Converts grayscale brightness values to a PNG data URL
-fn brightness_to_data_url(brightness: &[u8], width: u32, height: u32) -> Option<String> {
-    // Create grayscale image from brightness values
-    let img = ImageBuffer::<Luma<u8>, _>::from_raw(width, height, brightness)?;
-
-    // Encode to PNG in memory
-    let mut png_bytes = Vec::new();
-    img.write_to(
-        &mut std::io::Cursor::new(&mut png_bytes),
-        image::ImageFormat::Png,
-    )
-    .ok()?;
-
-    Some(format!(
-        "data:image/png;base64,{}",
-        STANDARD.encode(&png_bytes)
-    ))
-}
+use image::{Rgb, RgbImage};
+use std::io::Cursor;
 
 #[component]
-fn BrightnessImage(brightness_data: Vec<u8>, color: (u8, u8, u8), dem: Vec<u8>) -> Element {
-    let width = brightness_data.len().isqrt() as u32;
-    let height = width;
+fn RgbImageToBase64(img: RgbImage) -> Element {
+    let mut buf = Cursor::new(Vec::new());
+    img.write_to(&mut buf, image::ImageFormat::Png).unwrap();
 
-    let data_url = use_memo(move || {
-        brightness_to_data_url(&brightness_data, width, height).unwrap_or_default()
-    });
+    let b64 = STANDARD.encode(buf.into_inner());
+
+    let data_url = format!("data:image/png;base64,{}", b64);
 
     rsx! {
-        if !data_url().is_empty() {
-            img {
-                src: "{data_url}",
-                alt: "Brightness map",
-                width: "{width}",
-                height: "{height}"
-            }
-        } else {
-            div { "Invalid image dimensions" }
+        img {
+            style: "border: 2px solid white; width: 100%, height: 100%, max-width: 40vw; max-height: 60vh;",
+            src: "{data_url}",
+            alt: "Brightness map",
         }
     }
 }
@@ -358,8 +329,6 @@ async fn run_model(username: &str, password: &str, wkt_string: &str, date: &str)
 
     let json = serde_json::from_str::<serde_json::Value>(&result).unwrap_or_default();
 
-    // Get "original" Vec<u8>
-
     let original = json["original"]
         .as_array()
         .unwrap_or(&vec![])
@@ -381,11 +350,77 @@ async fn run_model(username: &str, password: &str, wkt_string: &str, date: &str)
         .map(|v| v.as_u64().unwrap_or(0) as u8)
         .collect::<Vec<u8>>();
 
+    let dimensions = json["dims"]
+        .as_array()
+        .unwrap_or(&vec![])
+        .iter()
+        .map(|v| v.as_u64().unwrap_or(0) as usize)
+        .collect::<Vec<usize>>();
+
+    let dem_pixels = dem.iter().flat_map(|v| [*v, *v, *v]).collect::<Vec<u8>>();
+
+    let dem_image =
+        RgbImage::from_vec(dimensions[0] as u32, dimensions[1] as u32, dem_pixels).unwrap();
+
+    // The before image will be the dem with the original image overlaid on top
+    let mut before_final = dem_image.clone();
+
+    let before_rgb = original
+        .iter()
+        .flat_map(|v| {
+            let pixel_brightness = *v as f32 / 255.0;
+            let r = 255.0 * pixel_brightness;
+            [r as u8, 0, 0]
+        })
+        .collect::<Vec<u8>>();
+
+    overlay_non_black(
+        &mut before_final,
+        &RgbImage::from_vec(dimensions[0] as u32, dimensions[1] as u32, before_rgb).unwrap(),
+    );
+
+    let mut after_final = dem_image.clone();
+
+    let after_rgb = results
+        .iter()
+        .flat_map(|v| {
+            let pixel_brightness = *v as f32 / 255.0;
+            let r = 255.0 * pixel_brightness;
+            [r as u8, 0, 0]
+        })
+        .collect::<Vec<u8>>();
+
+    overlay_non_black(
+        &mut after_final,
+        &RgbImage::from_vec(dimensions[0] as u32, dimensions[1] as u32, after_rgb).unwrap(),
+    );
+
     *OUTPUT_DATA.write() = ProcessingState::Processed {
-        before: IntImage(original),
-        after: IntImage(results),
-        dem: IntImage(dem),
+        before: before_final,
+        after: after_final,
     };
+}
+
+/// Overlays non-black pixels from `src` onto `dst`.
+/// Both images must have the same dimensions.
+fn overlay_non_black(dst: &mut RgbImage, src: &RgbImage) {
+    assert_eq!(
+        dst.dimensions(),
+        src.dimensions(),
+        "Images must be same size"
+    );
+
+    let mut pixel_counter = 0;
+
+    for (x, y, &pixel) in src.enumerate_pixels() {
+        if pixel != Rgb([0, 0, 0]) {
+            dst.put_pixel(x, y, pixel);
+            pixel_counter += 1;
+        }
+    }
+
+    println!("Overlayed {} pixels", pixel_counter);
+    println!("Original number of pixels: {}", src.width() * src.height());
 }
 
 fn strip_prefixes<'a>(string: &'a str, prefixes: &'a [&'a str]) -> &'a str {
@@ -406,20 +441,4 @@ fn strip_suffixes<'a>(string: &'a str, suffixes: &'a [&'a str]) -> &'a str {
         }
     }
     result
-}
-
-fn truncate_string_float(s: &str, decimal_places: usize) -> String {
-    if let Some(dot_index) = s.find('.') {
-        // Find the index where truncation should occur
-        let end_index = dot_index + 1 + decimal_places;
-
-        // Ensure end_index doesn't exceed the string length
-        if end_index >= s.len() {
-            s.to_string() // Return the original string if not enough decimal places
-        } else {
-            s[..end_index].to_string() // Slice and return the truncated string
-        }
-    } else {
-        s.to_string() // No decimal point found, return the original string
-    }
 }
