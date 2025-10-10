@@ -2,7 +2,6 @@ from wkt_processing import (
     get_drawn_wkt,
     get_wkt_extremes,
     get_hash,
-    cut_into_squares,
 )
 
 from utils import get_fires
@@ -11,6 +10,10 @@ import os
 import shutil
 
 import threading
+
+from datetime import datetime
+
+from utils import date_format_str
 
 
 def create_dataset(
@@ -32,24 +35,20 @@ def create_dataset(
         if len(days) < 2:
             continue
 
-        # threads.append(
-        #    threading.Thread(
-        #        target=process_fire,
-        #        args=(name, days, data_point_counter, username, password),
-        #    )
-        # )
-
-        process_fire(name, days, data_point_counter, username, password)
+        threads.append(
+            threading.Thread(
+                target=process_fire,
+                args=(name, days, data_point_counter, username, password),
+            )
+        )
 
         data_point_counter += len(days) - 1
 
     for thread in threads:
         thread.start()
+
+    for thread in threads:
         thread.join()
-
-
-from datetime import datetime
-from utils import date_format_str
 
 
 def process_fire(
@@ -58,6 +57,14 @@ def process_fire(
     print(f"Processing fire {name} with {len(days)} days of data")
 
     for i in range(len(days) - 1):
+        # Skip if the data point already exists
+        if os.path.exists(
+            f"finalized_dataset/data_point_{data_point_counter}/before.tiff"
+        ):
+            print(f"  Skipping data point {data_point_counter} (already exists)")
+            data_point_counter += 1
+            continue
+
         day_one = days[i]
         day_two = days[i + 1]
         print(f"  Processing days {day_one} and {day_two}")

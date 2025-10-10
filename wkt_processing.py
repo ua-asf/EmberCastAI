@@ -62,8 +62,8 @@ def get_wkt_extremes(
 
     # Target size: max dimension rounded up to grid + padding
     grid_size = SQUARE_SIZE * PIXEL_SIZE
-    target_long = (math.ceil(long_dist / grid_size) + 3) * grid_size
-    target_lat = (math.ceil(lat_dist / grid_size) + 3) * grid_size
+    target_long = (math.ceil(long_dist / grid_size) + 1) * grid_size
+    target_lat = (math.ceil(lat_dist / grid_size) + 1) * grid_size
 
     r_earth = 6378137
     lat_center_rad = math.radians(lat_center)
@@ -162,11 +162,18 @@ def get_sar_over_area(
 
         # === Step 1: Check if a polygon covers the area of the fire polygon ===
 
+        polygon_strs = []
+
         for result in results:
             candidate_polygon = Polygon(result.geometry["coordinates"][0])
+            polygon_strs.append(
+                f"POLYGON(( {', '.join([f'{a} {b}' for a, b in result.geometry['coordinates'][0]])} ))"
+            )
             if candidate_polygon.contains_properly(fire_polygon):
                 final_results = [result]
                 break
+
+        print(f"GEOMETRYCOLLECTION ( {', '.join(polygon_strs)} )")
 
         # Check if we found a suitable polygon
         if len(final_results) == 1:
@@ -191,7 +198,10 @@ def get_sar_over_area(
             )
         else:
             # Return whichever list has a shorter length
-            if len(ascending_granules) > len(descending_granules):
+            if (
+                len(ascending_granules) > len(descending_granules)
+                and len(descending_granules) > 0
+            ):
                 final_results = descending_granules
             else:
                 final_results = ascending_granules
@@ -219,6 +229,7 @@ def get_sar_over_area(
         generated_grds.append(
             generate_geocoded_grd(
                 result.properties["sceneName"],
+                epsg_code_poly=Polygon(result.geometry["coordinates"][0]),
                 in_dir="tmp",
                 # Output to tmp so we can cache the GRD files for later use
                 out_dir="tmp",
@@ -243,9 +254,21 @@ def get_sar_over_area(
         raise ValueError(f"Unexpected number of GRD files: {len(generated_grds)}")
 
 
+from shapely.geometry import mapping
+
+
 def get_containing_flight_dir_polygon(results, direction, fire_polygon):
     candidate_polygon = Polygon()
     mosaic_results = []
+
+    fire_polygon_center = fire_polygon.centroid
+
+    # Sort results by distance to center of fire polygon
+    results.sort(
+        key=lambda x: Polygon(x.geometry["coordinates"][0]).centroid.distance(
+            fire_polygon_center
+        )
+    )
 
     for result in results:
         if not result.properties["flightDirection"] == direction:
@@ -256,16 +279,35 @@ def get_containing_flight_dir_polygon(results, direction, fire_polygon):
         intersection = candidate_polygon.intersection(new_polygon)
 
         # Skip if the new polygon has more than a certain percentage overlap with the existing candidate polygon
-        if candidate_polygon.area != 0 and intersection.area / new_polygon.area > 0.3:
+        if candidate_polygon.area != 0 and intersection.area / new_polygon.area > 0.5:
+            print(
+                f"Skipping polygon due to high overlap: POLYGON(( {', '.join([f'{a} {b}' for a, b in result.geometry['coordinates'][0]])} ))"
+            )
+
+            candidate_coords = mapping(candidate_polygon)["coordinates"][0]
+
+            print(
+                f"Current polygon: POLYGON(( {', '.join([f'{coord[0]} {coord[1]}' for coord in candidate_coords])} ))"
+            )
             continue
 
         candidate_polygon = candidate_polygon.union(new_polygon)
         mosaic_results.append(result)
 
-        if candidate_polygon.contains_properly(fire_polygon):
+        intersection = candidate_polygon.intersection(fire_polygon)
+
+        coverage = intersection.area / fire_polygon.area
+
+        if candidate_polygon.contains_properly(fire_polygon) or coverage > 0.99:
             break
 
-    if candidate_polygon.contains_properly(fire_polygon):
+    intersection = candidate_polygon.intersection(fire_polygon)
+
+    coverage = intersection.area / fire_polygon.area
+
+    print(f"{coverage=}, {candidate_polygon.area=}, {fire_polygon.area=}")
+
+    if candidate_polygon.contains_properly(fire_polygon) or coverage > 0.99:
         return mosaic_results
     else:
         return []
@@ -343,18 +385,17 @@ def get_drawn_wkt(
     """
     Downloads SAR data for the given WKT polygons and date, processes it, and draws the WKT ontop of an np.
     """
-
     # Create assets/tmp/{wkt_string}/data directory if it doesn't exist
     if not os.path.isdir(f"{file_path}/data"):
         os.makedirs(f"{file_path}/data")
 
     # Make a square polygon from the extremes - add padding so the SAR data covers the entire area
     polygon = [
-        (extremes[2] - 0.1, extremes[1] + 0.1),
-        (extremes[2] - 0.1, extremes[0] - 0.1),
-        (extremes[3] + 0.1, extremes[0] - 0.1),
-        (extremes[3] + 0.1, extremes[1] + 0.1),
-        (extremes[2] - 0.1, extremes[1] + 0.1),
+        (extremes[2] - 0.035, extremes[1] + 0.035),
+        (extremes[2] - 0.035, extremes[0] - 0.035),
+        (extremes[3] + 0.035, extremes[0] - 0.035),
+        (extremes[3] + 0.035, extremes[1] + 0.035),
+        (extremes[2] - 0.035, extremes[1] + 0.035),
     ]
 
     results = get_sar_over_area(
@@ -367,18 +408,18 @@ def get_drawn_wkt(
 
     # Download DEM data for the area.
     # We need to add a bit of padding to ensure we cover the entire area
-    # dem = download_dem_from_bounds(
-    # extremes[0] - 0.05,
-    # extremes[1] + 0.05,
-    # extremes[2] - 0.05,
-    # extremes[3] + 0.05,
-    # f"{file_path}/data",
-    # )
+    dem = download_dem_from_bounds(
+        extremes[0] - 0.05,
+        extremes[1] + 0.05,
+        extremes[2] - 0.05,
+        extremes[3] + 0.05,
+        f"{file_path}/data",
+    )
 
     tiff_files = [
         results[0],  # VV band
         results[1],  # VH band
-        # dem       , # DEM
+        dem,  # DEM
     ]
 
     # Perform translation for 20x20 pixel sizes
@@ -406,8 +447,6 @@ def get_drawn_wkt(
     draw_wkt_to_geotiff(
         wkt_strs, input_file, output_file=f"{file_path}/data/merged_wkt.tiff"
     )
-
-    # raise Exception("Debug stop")
 
     # Open the file and extract the band with the WKT drawn on it
     return extract_bands_from_tiff(f"{file_path}/data/merged_wkt.tiff")
@@ -437,7 +476,7 @@ def cut_into_squares(array, square_size=SQUARE_SIZE):
 
     # Add batch dimension: (num_patches, channels, H, W) -> (num_patches, 1, channels, H, W)
     return (
-        torch.from_numpy(np.array(squares)).unsqueeze(1),
+        torch.from_numpy(np.array(squares)),
         num_squares_x,
         num_squares_y,
     )
@@ -445,43 +484,62 @@ def cut_into_squares(array, square_size=SQUARE_SIZE):
 
 def run_inference(squares):
     """Run inference on the provided data and return the stitched results as a numpy array"""
-    results = []
-    model = SimpleFireCNN()
-    model.load_state_dict(torch.load(f"{os.getcwd()}/fire_predictor_model.pth"))
+    # Load checkpoint
+    checkpoint = torch.load(
+        f"{os.getcwd()}/checkpoints/best_model.pth", map_location="cpu"
+    )
+
+    # Get input channels from checkpoint to initialize model correctly
+    in_channels = checkpoint["in_channels"]
+
+    # Initialize model with correct number of channels
+    model = SimpleFireCNN(in_channels=in_channels)
+
+    # Load only the model weights
+    model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()
 
+    results = []
     with torch.no_grad():
         for square in squares:
-            results.append(model(square).numpy())
+            # Convert to tensor if needed
+            if not isinstance(square, torch.Tensor):
+                square = torch.from_numpy(square)
+
+            # Convert to float32 and normalize (assuming UINT16 input)
+            square = square.float() / 65535.0
+
+            # Add batch dimension if needed: (C, H, W) -> (1, C, H, W)
+            if square.dim() == 3:
+                square = square.unsqueeze(0)
+
+            # Run inference
+            output = model(square)
+
+            # Remove batch dimension and convert to numpy
+            output = output.squeeze(0).numpy()
+            results.append(output)
 
     return results
 
 
-def stitch_results(squares, square_size=SQUARE_SIZE):
+def stitch_results(squares, num_squares_x, num_squares_y, square_size=SQUARE_SIZE):
     """Stitch squares back into a single array"""
     num_squares = len(squares)
     if num_squares == 0:
         return np.array([])
 
     # Calculate dimensions
-    num_rows = int(np.sqrt(num_squares))
-    num_cols = (num_squares + num_rows - 1) // num_rows
-    stitched_height = num_rows * square_size
-    stitched_width = num_cols * square_size
+    stitched_height = num_squares_y * square_size
+    stitched_width = num_squares_x * square_size
 
     stitched_array = np.zeros((stitched_height, stitched_width), dtype=np.float32)
 
-    print(f"{square_size=}")
-
     for idx, square in enumerate(squares):
-        row = idx // num_cols
-        col = idx % num_cols
+        row = idx // num_squares_x
+        col = idx % num_squares_y
         y_offset = row * square_size
         x_offset = col * square_size
-
-        print(f"Placing square {idx} at ({y_offset}, {x_offset})")
-        print(f"{square.shape=}")
-        print(f"{stitched_array.shape=}")
 
         stitched_array[
             y_offset : y_offset + square_size, x_offset : x_offset + square_size
@@ -495,7 +553,7 @@ def process(
     password: str,
     wkt_list: list[list[tuple[float, float]]],
     date_str: str,
-) -> tuple[list[int], list[int], list[int]]:
+) -> tuple[tuple[int, int], list[int], list[int], list[int]]:
     data = get_drawn_wkt(
         username=username,
         password=password,
@@ -507,21 +565,33 @@ def process(
 
     print(f"Downloaded data shape: {data.shape}")
 
-    squares = cut_into_squares(data)
+    squares, num_squares_x, num_squares_y = cut_into_squares(data)
 
     results = run_inference(squares)
 
     print(f"Got {len(results)} results from inference")
     print(f"First result shape: {results[0].shape if results else 'N/A'}")
 
-    stitched_results: list[int] = [int(x) for x in stitch_results(results).flatten()]
+    stitched_results: list[int] = [
+        int(x) for x in stitch_results(results, num_squares_x, num_squares_y).flatten()
+    ]
+
+    original_mask = [int((pt / 65535) * 255.0) for pt in data[0].flatten()]
+
+    dem_data = [pt for pt in data[3].flatten()]
+
+    dem_max = max(dem_data)
+
+    dem_u8 = [int(float(pt / dem_max) * 255.0) for pt in dem_data]
+
+    print(f"DEM min/max: {min(dem_u8)}/{max(dem_u8)}")
 
     return (
+        (num_squares_x * SQUARE_SIZE, num_squares_y * SQUARE_SIZE),
         # Original mask (first band)
-        data[0].flatten().astype(int).tolist(),
+        original_mask,
         # Results from inference
         stitched_results,
         # Digital elevation model (4th band)
-        data[3].flatten().astype(int).tolist(),
+        dem_u8,
     )
-

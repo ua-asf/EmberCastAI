@@ -29,6 +29,7 @@ class ProcessWKTRequest(BaseModel):
 
 
 class OriginalAndResults(BaseModel):
+    dims: tuple[int, int]
     original: list[int]
     results: list[int]
     dem: list[int]
@@ -36,11 +37,11 @@ class OriginalAndResults(BaseModel):
 
 @app.post("/process_wkt")
 async def process_wkt(req: ProcessWKTRequest) -> OriginalAndResults:
-    original, results, dem = process(
+    dims, original, results, dem = process(
         req.username, req.password, req.wkt_points, req.date_str
     )
 
-    return OriginalAndResults(original=original, results=results, dem=dem)
+    return OriginalAndResults(dims=dims, original=original, results=results, dem=dem)
 
 
 class WKTExtremes(BaseModel):
