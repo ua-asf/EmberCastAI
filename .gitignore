@@ -1,4 +1,8 @@
 /dataset
+/tmp
+/finalized_dataset
+/model/checkpoints
+env.sh
 *.txt
 .env
 /organized_dataset

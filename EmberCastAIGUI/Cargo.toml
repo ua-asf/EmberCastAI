@@ -5,9 +5,12 @@ edition = "2024"
 
 [dependencies]
 base64 = "0.22.1"
-chrono = "0.4.41"
+chrono = "0.4.42"
 dioxus = "0.6.3"
-tokio = { version = "1.47.0", features = ["full"] }
+image = "0.25.8"
+reqwest = { version = "0.12.23", features = ["blocking", "json"] }
+serde_json = "1.0.145"
+tokio = { version = "1.47.1", features = ["full"] }
 
 [features]
 default = ["desktop"]
