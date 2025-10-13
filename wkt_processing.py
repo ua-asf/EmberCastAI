@@ -476,7 +476,7 @@ def cut_into_squares(array, square_size=SQUARE_SIZE):
 
     # Add batch dimension: (num_patches, channels, H, W) -> (num_patches, 1, channels, H, W)
     return (
-        torch.from_numpy(np.array(squares)),
+        np.array(squares),
         num_squares_x,
         num_squares_y,
     )
@@ -502,6 +502,14 @@ def run_inference(squares):
     results = []
     with torch.no_grad():
         for square in squares:
+            # Skip processing if the squaure mask is all zeros
+            # or all ones
+
+            if np.max(square[0]) == 0 or np.min(square[0]) == 65535:
+                results.append(square[0].astype(np.float32) / 65535.0)
+                print("Skipping empty or full square")
+                continue
+
             # Convert to tensor if needed
             if not isinstance(square, torch.Tensor):
                 square = torch.from_numpy(square)

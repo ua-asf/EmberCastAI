@@ -217,14 +217,14 @@ fn RenderImage() -> Element {
                 },
                 ProcessingState::Processed { ref before, ref after } => {
                     rsx! {
-                        div { style: "display: flex; flex-direction: row; gap: 20px; justify-content: center; align-items: center; padding-top: 10px; padding-bottom: 10px; width: 100%; max-height: 90vh",
-                            div { style: "display: flex; flex-direction: column; gap: 10px; justify-content: center; align-items: center; width: 40vw; height: 90vh;",
+                        div { style: "display: flex; flex-direction: row; gap: 20px; justify-content: center; align-items: center; padding-top: 10px; padding-bottom: 10px; width: 100%; height: 100%",
+                            div { style: "display: flex; flex-direction: column; gap: 10px; justify-content: center; align-items: center; width: 40vw; height: 100;",
                                 p { style: "color: red; font-size: 20px", "Before" }
-                                RgbImageToBase64 { img: before.clone() }
+                                RgbImageToBase64 { img: before.clone(), border_color: "red" }
                             }
-                            div { style: "display: flex; flex-direction: column; gap: 10px; justify-content: center; align-items: center; width: 40vw; height: 90vh;",
+                            div { style: "display: flex; flex-direction: column; gap: 10px; justify-content: center; align-items: center; width: 40vw; height: 100%",
                                 p { style: "color: green; font-size: 20px", "After" }
-                                RgbImageToBase64 { img: after.clone() }
+                                RgbImageToBase64 { img: after.clone(), border_color: "green" }
                             }
                         }
                     }
@@ -239,7 +239,7 @@ use image::{Rgb, RgbImage};
 use std::io::Cursor;
 
 #[component]
-fn RgbImageToBase64(img: RgbImage) -> Element {
+fn RgbImageToBase64(img: RgbImage, border_color: &'static str) -> Element {
     let mut buf = Cursor::new(Vec::new());
     img.write_to(&mut buf, image::ImageFormat::Png).unwrap();
 
@@ -249,7 +249,7 @@ fn RgbImageToBase64(img: RgbImage) -> Element {
 
     rsx! {
         img {
-            style: "border: 2px solid white; width: 100%; height: 100%, object-fit: contain; display: block;",
+            style: "border: 2px solid {border_color}; width: 100%; height: 100%, object-fit: contain; display: block;",
             src: "{data_url}",
             alt: "Brightness map",
         }
