@@ -4,7 +4,8 @@ use dioxus::{
     document::{Style, Title},
     prelude::*,
 };
-use tokio::process::Command;
+
+use serde_json::json;
 
 fn main() {
     dioxus::launch(App);
@@ -13,11 +14,20 @@ fn main() {
 pub static USERNAME: GlobalSignal<Option<String>> = GlobalSignal::new(|| None);
 pub static PASSWORD: GlobalSignal<Option<String>> = GlobalSignal::new(|| None);
 pub static WKT_STRING: GlobalSignal<Option<String>> = GlobalSignal::new(|| None);
-pub static OUTPUT_FILES: GlobalSignal<Vec<(String, String)>> = GlobalSignal::new(Vec::new);
+pub static OUTPUT_DATA: GlobalSignal<ProcessingState> =
+    GlobalSignal::new(|| ProcessingState::Empty);
 pub static STATUS_MESSAGE: GlobalSignal<Option<String>> = GlobalSignal::new(|| None);
 pub static INDEX: GlobalSignal<usize> = GlobalSignal::new(|| 0);
 
 pub static THROBBER: Asset = asset!("assets/throbber.svg");
+
+pub static API_ENDPOINT: &str = "http://127.0.0.1:8000";
+
+enum ProcessingState {
+    Empty,
+    Processing(String), // Throbber or placeholder image location
+    Processed { before: RgbImage, after: RgbImage },
+}
 
 #[component]
 pub fn App() -> Element {
@@ -142,12 +152,12 @@ fn UIinputs() -> Element {
                             return;
                         }
                         button_clickable.set(false);
-                        let date_format_str = "%Y-%m-%dT%H:%M:%S.%3f";
+                        let date_format_str = "%Y-%m-%dT%H:%M:%S";
                         let formatted_date: String = chrono::Local::now()
                             .format(date_format_str)
                             .to_string();
                         println!("Formatted date: {}", formatted_date);
-                        OUTPUT_FILES.write().push((THROBBER.to_string(), String::new()));
+                        *OUTPUT_DATA.write() = ProcessingState::Processing(THROBBER.to_string());
                         spawn(async move {
                             run_model(
                                     &USERNAME().unwrap_or_default(),
@@ -180,103 +190,70 @@ fn Separator() -> Element {
 
 #[component]
 fn RenderImage() -> Element {
-    let files_count = OUTPUT_FILES.read().len();
-
     rsx! {
-        div { style: "display: flex; flex-direction: column; justify-content: start; align-items: center; height: 100vh; width: 100%; overflow: hidden",
-            // Image navigation buttons
-            div { style: "display: flex; justify-content: center; align-items: center; align-self: start; width: 100%; gap: 10px; padding-bottom: 10px; padding-top: 10px;",
-                // Previous/Decrement button
-                button {
-                    disabled: *INDEX.read() == 0,
-                    onclick: move |_| {
-                        if *INDEX.read() > 0 {
-                            *INDEX.write() = *INDEX.read() - 1;
-                        }
-                    },
-                    "← Previous"
-                }
-
-                // Count
-                p { style: "margin: 0; padding: 2px;",
-                    if files_count > 0 {
-                        "{*INDEX.read() + 1}/{files_count}"
-                    } else {
-                        "0/0"
-                    }
-                }
-
-                // Next/Increment button
-                button {
-                    disabled: *INDEX.read() + 1 >= files_count,
-                    onclick: move |_| {
-                        if *INDEX.read() < files_count - 1 {
-                            *INDEX.write() = *INDEX.read() + 1;
-                        }
-                    },
-                    "Next →"
-                }
-            }
-
+        div { style: "display: flex; flex-direction: column; justify-content: start; align-items: center; height: 100vh; width: 100vw; overflow: hidden",
             // Render the selected image if any are available
-            if !OUTPUT_FILES.read().is_empty() {
-                if OUTPUT_FILES.read()[*INDEX.read()].0.ends_with("svg") {
-                    img {
-                        style: "padding-top: 30px; padding-bottom: 10px; align-self: center;",
-                        fill: "#fff",
-                        width: "200",
-                        height: "200",
-                        src: "{OUTPUT_FILES.read()[*INDEX.read()].0.clone()}",
-                    }
-                    p { style: "font-size: 24px;",
-                        if let Some(message) = STATUS_MESSAGE.read().clone() {
-                            "{message}"
-                        } else {
-                            "Processing..."
+            match *OUTPUT_DATA.read() {
+                ProcessingState::Empty => {
+                    rsx! { p { style: "font-size: 24px;", "No image available" } }
+                },
+                ProcessingState::Processing(ref img_path) => {
+                    rsx! {
+                        img {
+                            style: "padding-top: 30px; padding-bottom: 10px; align-self: center;",
+                            fill: "#fff",
+                            width: "200",
+                            height: "200",
+                            src: "{img_path}",
                         }
-                    }
-                } else {
-                    // Display both images side by side
-                    div { style: "height: 100%; width: 100%; align-content: center; justify-content: space-around; display: flex; ",
-                       div {
-                            p { style: "color: red", "Original" }
-                            img {
-                                src: "{load_image_from_file(OUTPUT_FILES.read()[*INDEX.read()].0.clone())}",
-                                alt: "Processed Image",
-                                style: "max-width: 80%;
-                                max-height: 100%;
-                                border: 5px solid red;
-                                object-fit: contain;",
+                        p { style: "font-size: 24px;",
+                            if let Some(message) = STATUS_MESSAGE.read().clone() {
+                                "{message}"
+                            } else {
+                                "Processing..."
                             }
                         }
-                        div {
-                            p { style: "color: green", "Prediction" }
-                            img {
-                                src: "{load_image_from_file(OUTPUT_FILES.read()[*INDEX.read()].1.clone())}",
-                                alt: "Processed Image",
-                                style: "max-width: 80%;
-                                max-height: 100%;
-                                border: 5px solid green;
-                                object-fit: contain;",
+                    }
+                },
+                ProcessingState::Processed { ref before, ref after } => {
+                    rsx! {
+                        div { style: "display: flex; flex-direction: row; gap: 20px; justify-content: center; align-items: center; padding-top: 10px; padding-bottom: 10px; width: 100%; height: 100%",
+                            div { style: "display: flex; flex-direction: column; gap: 10px; justify-content: center; align-items: center; width: 40vw; height: 100;",
+                                p { style: "color: red; font-size: 20px", "Before" }
+                                RgbImageToBase64 { img: before.clone(), border_color: "red" }
+                            }
+                            div { style: "display: flex; flex-direction: column; gap: 10px; justify-content: center; align-items: center; width: 40vw; height: 100%",
+                                p { style: "color: green; font-size: 20px", "After" }
+                                RgbImageToBase64 { img: after.clone(), border_color: "green" }
                             }
                         }
                     }
                 }
-            } else {
-                p { style: "font-size: 24px;", "No image available" }
             }
         }
     }
 }
 
-fn load_image_from_file(path: String) -> String {
-    use base64::prelude::*;
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+use image::{Rgb, RgbImage};
+use std::io::Cursor;
 
-    let file_content = std::fs::read(path).expect("Failed to read image file");
+#[component]
+fn RgbImageToBase64(img: RgbImage, border_color: &'static str) -> Element {
+    let mut buf = Cursor::new(Vec::new());
+    img.write_to(&mut buf, image::ImageFormat::Png).unwrap();
 
-    let encoded_image = BASE64_STANDARD.encode(file_content);
+    let b64 = STANDARD.encode(buf.into_inner());
 
-    format!("data:image/png;base64,{}", encoded_image)
+    let data_url = format!("data:image/png;base64,{}", b64);
+
+    rsx! {
+        img {
+            style: "border: 2px solid {border_color}; width: 100%; height: 100%, object-fit: contain; display: block;",
+            src: "{data_url}",
+            alt: "Brightness map",
+        }
+    }
 }
 
 /// Runs the model using the provided parameters.
@@ -292,54 +269,197 @@ fn load_image_from_file(path: String) -> String {
 /// This function does not return a value. It spawns a process and waits for it to finish.
 /// The output file path is stored in the `OUTPUT_FILE` global signal.
 async fn run_model(username: &str, password: &str, wkt_string: &str, date: &str) {
-    let mut child = Command::new("nix")
-        .arg("run")
-        .arg(".")
-        .arg("--")
-        .arg(username)
-        .arg(password)
-        .arg(format!("\"{wkt_string}\""))
-        .arg(date)
-        .spawn()
-        .expect("Failed to spawn child process");
+    // Strip all of the possible prefix combinations from the WKT string
+    let wkt_prefix_stripped = strip_prefixes(wkt_string, &["POLYGON", " ", "((", " "]);
 
-    let mut success = false;
+    let wkt_stripped = strip_suffixes(wkt_prefix_stripped, &[" ", "))"]);
 
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                success = status.success();
-                break;
-            }
-            Ok(None) => {
-                // Check the log file for a new status message
-                let status_log_path = format!("assets/tmp/{}/status.txt", date);
-                let status_message = std::fs::read_to_string(&status_log_path)
-                    .unwrap_or_else(|_| "Processing...".to_string());
+    println!("Stripped WKT: {}", wkt_stripped);
 
-                *STATUS_MESSAGE.write() = Some(status_message);
+    // Parse coordinates into actual numbers, not strings
+    let wkt_points: Vec<Vec<[f64; 2]>> = vec![
+        wkt_stripped
+            .split(", ")
+            .map(|v| {
+                let (x, y) = v.split_once(" ").unwrap();
+                [x.parse::<f64>().unwrap(), y.parse::<f64>().unwrap()]
+            })
+            .collect(),
+    ];
 
-                // Process is still running, wait a bit before checking again
-                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-            }
-            Err(e) => {
-                eprintln!("Error waiting for child process: {}", e);
-                break;
-            }
+    // Use serde_json for proper structure
+    let data = json!({
+        "username": username,
+        "password": password,
+        "wkt_points": wkt_points,
+        "date_str": date,
+    });
+
+    let client = reqwest::Client::new();
+
+    let response = match client
+        .post(format!("{}/process_wkt", API_ENDPOINT))
+        .json(&data)
+        .send()
+        .await
+    {
+        Ok(resp) => resp,
+        Err(e) => {
+            *STATUS_MESSAGE.write() = Some(format!("Error: Failed to send request - {}", e));
+            return;
         }
+    };
+
+    if response.status() != 200 {
+        *STATUS_MESSAGE.write() = Some(format!(
+            "Error: Received status code {}, {}",
+            response.status(),
+            response.text().await.unwrap_or_default()
+        ));
+        return;
     }
 
     // Reset status message
     *STATUS_MESSAGE.write() = None;
 
-    // Drop trhobber
-    std::mem::drop(OUTPUT_FILES.write().pop());
+    let result = response.text().await.unwrap_or_default();
 
-    // Look for file in assets/tmp/{date}/output.png
-    if success {
-        OUTPUT_FILES.write().push((
-            format!("assets/tmp/{}/original.png", date),
-            format!("assets/tmp/{}/output.png", date),
-        ));
+    // Process result into two IntImage structs
+    // Turn response into json
+
+    let json = serde_json::from_str::<serde_json::Value>(&result).unwrap_or_default();
+
+    let original = json["original"]
+        .as_array()
+        .unwrap_or(&vec![])
+        .iter()
+        .map(|v| v.as_u64().unwrap_or(0) as u8)
+        .collect::<Vec<u8>>();
+
+    let results = json["results"]
+        .as_array()
+        .unwrap_or(&vec![])
+        .iter()
+        .map(|v| v.as_u64().unwrap_or(0) as u8)
+        .collect::<Vec<u8>>();
+
+    let dem = json["dem"]
+        .as_array()
+        .unwrap_or(&vec![])
+        .iter()
+        // Darken the DEM a bit for better visibility
+        .map(|v| v.as_u64().unwrap_or(0) as u8 / 2)
+        .collect::<Vec<u8>>();
+
+    let dimensions = json["dims"]
+        .as_array()
+        .unwrap_or(&vec![])
+        .iter()
+        .map(|v| v.as_u64().unwrap_or(0) as usize)
+        .collect::<Vec<usize>>();
+
+    println!("Dimensions: {:?}", dimensions);
+    println!("Original length: {}", original.len());
+    println!("Results length: {}", results.len());
+    println!("DEM length: {}", dem.len());
+
+    let dem_pixels = dem.iter().flat_map(|v| [*v, *v, *v]).collect::<Vec<u8>>();
+
+    let dem_image =
+        RgbImage::from_vec(dimensions[0] as u32, dimensions[1] as u32, dem_pixels).unwrap();
+
+    // The before image will be the dem with the original image overlaid on top
+    let mut before_final = dem_image.clone();
+
+    let before_rgb = original
+        .iter()
+        .flat_map(|v| {
+            let pixel_brightness = *v as f32 / 255.0;
+            let r = 255.0 * pixel_brightness;
+            [r as u8, 0, 0]
+        })
+        .collect::<Vec<u8>>();
+
+    overlay_non_black(
+        &mut before_final,
+        &RgbImage::from_vec(
+            dimensions[0] as u32,
+            dimensions[1] as u32,
+            before_rgb.clone(),
+        )
+        .unwrap(),
+    );
+
+    let mut after_final = dem_image;
+
+    let after_rgb = results
+        .iter()
+        .flat_map(|v| {
+            let pixel_brightness = *v as f32 / 255.0;
+            let p = 255.0 * pixel_brightness;
+            [0, p as u8, 0]
+        })
+        .collect::<Vec<u8>>();
+
+    // Add the model's predictions in red
+    overlay_non_black(
+        &mut after_final,
+        &RgbImage::from_vec(dimensions[0] as u32, dimensions[1] as u32, after_rgb).unwrap(),
+    );
+
+    // Add the original data in yellow
+    overlay_non_black(
+        &mut after_final,
+        &RgbImage::from_vec(dimensions[0] as u32, dimensions[1] as u32, before_rgb).unwrap(),
+    );
+
+    *OUTPUT_DATA.write() = ProcessingState::Processed {
+        before: before_final,
+        after: after_final,
+    };
+}
+
+/// Overlays non-black pixels from `src` onto `dst`.
+/// Both images must have the same dimensions.
+fn overlay_non_black(dst: &mut RgbImage, src: &RgbImage) {
+    assert_eq!(
+        dst.dimensions(),
+        src.dimensions(),
+        "Images must be same size"
+    );
+
+    for (x, y, &pixel) in src.enumerate_pixels() {
+        if pixel != Rgb([0, 0, 0]) {
+            // Get source pixel data
+            let mut new_pixel = pixel;
+
+            let dst_pixel = dst.get_pixel(x, y);
+
+            new_pixel[0] = (new_pixel[0] as u16 + dst_pixel[0] as u16).min(255) as u8;
+            new_pixel[1] = (new_pixel[1] as u16 + dst_pixel[1] as u16).min(255) as u8;
+            new_pixel[2] = (new_pixel[2] as u16 + dst_pixel[2] as u16).min(255) as u8;
+
+            dst.put_pixel(x, y, new_pixel);
+        }
     }
+}
+
+fn strip_prefixes<'a>(string: &'a str, prefixes: &'a [&'a str]) -> &'a str {
+    let mut result = string;
+    for prefix in prefixes {
+        if result.starts_with(prefix) {
+            result = &result[prefix.len()..];
+        }
+    }
+    result
+}
+
+fn strip_suffixes<'a>(string: &'a str, suffixes: &'a [&'a str]) -> &'a str {
+    let mut result = string;
+    for suffix in suffixes {
+        if result.ends_with(suffix) {
+            result = &result[..result.len() - suffix.len()];
+        }
+    }
+    result
 }
