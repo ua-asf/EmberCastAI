@@ -81,8 +81,23 @@ class FireDataset(Dataset):
                 # Extract tile from before.tiff (all bands)
                 before_tile = before_data[:, y_start:y_end, x_start:x_end]
 
+                # Check that the tile has data in it
+                before_max = np.max(before_tile[0])
+                before_min = np.min(before_tile[0])
+
                 # Extract tile from after.tiff (first band only)
                 after_tile = after_data[y_start:y_end, x_start:x_end]
+
+                after_max = np.max(after_tile)
+                after_min = np.min(after_tile)
+
+                # Both should not be completely empty
+                if before_max == 0 and after_max == 0:
+                    continue
+
+                # Both should not be completely full
+                if before_min == 65535 and after_min == 65535:
+                    continue
 
                 # Store as tuple (input_tile, target_tile)
                 self.tiles.append((before_tile.copy(), after_tile.copy()))
