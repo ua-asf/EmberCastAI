@@ -148,19 +148,18 @@
                 mkdir -p $out/tmp/matplotlib
                 chmod -R 777 $out/tmp
                 cp ${./.}/*.py $out/app/
+                mkdir -p $out/app/checkpoints
+                cp ${./.}/checkpoints/best_model.pth $out/app/checkpoints/best_model.pth
                 cp ${./.}/EmberCastAIGUI/assets/model/fire_predictor_model.pth $out/app/fire_predictor_model.pth
               '')
             ];
           };
           
           config = {
-            Cmd = [
-              "${python-env}/bin/uvicorn"
-              "api:app"
-              "--host"
-              "0.0.0.0"
-              "--port"
-              "8000"
+              Cmd = [
+              "${pkgs.bash}/bin/bash"
+              "-c"
+              "source /app/env.sh && exec ${python-env}/bin/uvicorn api:app --host 0.0.0.0 --port 8000"
             ];
             WorkingDir = "/app";
             ExposedPorts = {
