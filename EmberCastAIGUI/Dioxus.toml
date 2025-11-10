@@ -1,9 +1,0 @@
-[application]
-name = "EmberCastAI"
-out_dir = "embercastai"
-asset_dir = "assets"
-
-[bundle]
-identifier = "asf.alaska.edu"
-publisher = "Alaska Satellite Facility"
-icon = ["assets/icon.png"]
