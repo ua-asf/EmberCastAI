@@ -56,7 +56,7 @@ jobs:
         run: |
           echo "VERSION=${{ steps.get-latest-tag.outputs.tag }}" >> $GITHUB_ENV
       - name: Generate a changelog
-        uses: orhun/git-cliff-action@v2
+        uses: orhun/git-cliff-action@v4
         id: git-cliff
         with:
           config: cliff.toml
@@ -103,6 +103,7 @@ jobs:
           nix run  # Runs dx bundle --release
           mv docs/public/* docs
           rm -r docs/public
+          mv docs ../docs
 
       - name: Deploy to GH Pages
         if: ${{ !github.event.act }} # skip during local actions testing
