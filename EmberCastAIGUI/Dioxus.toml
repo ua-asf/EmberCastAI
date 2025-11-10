@@ -1,9 +1,14 @@
 [application]
 name = "EmberCastAI"
-out_dir = "embercastai"
+out_dir = "docs"
 asset_dir = "assets"
+
+[web.app]
+title = "EmberCast AI"
+#base_path = "EmberCastAI"
 
 [bundle]
 identifier = "asf.alaska.edu"
 publisher = "Alaska Satellite Facility"
 icon = ["assets/icon.png"]
+

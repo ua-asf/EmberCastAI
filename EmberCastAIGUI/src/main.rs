@@ -11,17 +11,17 @@ fn main() {
     dioxus::launch(App);
 }
 
-pub static USERNAME: GlobalSignal<Option<String>> = GlobalSignal::new(|| None);
-pub static PASSWORD: GlobalSignal<Option<String>> = GlobalSignal::new(|| None);
-pub static WKT_STRING: GlobalSignal<Option<String>> = GlobalSignal::new(|| None);
-pub static OUTPUT_DATA: GlobalSignal<ProcessingState> =
-    GlobalSignal::new(|| ProcessingState::Empty);
-pub static STATUS_MESSAGE: GlobalSignal<Option<String>> = GlobalSignal::new(|| None);
-pub static INDEX: GlobalSignal<usize> = GlobalSignal::new(|| 0);
+static USERNAME: GlobalSignal<Option<String>> = GlobalSignal::new(|| None);
+static PASSWORD: GlobalSignal<Option<String>> = GlobalSignal::new(|| None);
+static WKT_STRING: GlobalSignal<Option<String>> = GlobalSignal::new(|| None);
+static OUTPUT_DATA: GlobalSignal<ProcessingState> = GlobalSignal::new(|| ProcessingState::Empty);
+static STATUS_MESSAGE: GlobalSignal<Option<String>> = GlobalSignal::new(|| None);
+static INDEX: GlobalSignal<usize> = GlobalSignal::new(|| 0);
 
-pub static THROBBER: Asset = asset!("assets/throbber.svg");
+static THROBBER: Asset = asset!("assets/throbber.svg");
+static FONT: Asset = asset!("assets/PixeloidSans.ttf");
 
-pub static API_ENDPOINT: &str = "http://127.0.0.1:8000";
+static API_ENDPOINT: &str = "http://127.0.0.1:8000";
 
 enum ProcessingState {
     Empty,
@@ -38,7 +38,7 @@ pub fn App() -> Element {
         Style {
             r#"@font-face {{
                 font-family: 'Pixel';
-                src: url('assets/fonts/pixeloid/PixeloidSans-mLxMm.ttf') format('truetype');
+                src: url({FONT}) format('truetype');
                 font-weight: 400;
                 font-display: swap;
                 font-style: normal;

@@ -1,5 +1,5 @@
 {
-  description = "Python GUI app with embedded dependencies";
+  description = "Rust development for Dioxus Web";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -9,78 +9,61 @@
   outputs = { self, nixpkgs, flake-utils }:
     flake-utils.lib.eachDefaultSystem (system:
       let
-        pkgs = import nixpkgs { inherit system; };
+        pkgs = nixpkgs.legacyPackages.${system};
+      in
+      {
+        devShells.default = pkgs.mkShell {
+          buildInputs = with pkgs; [
+            rustc
+            cargo
+            cargo-binstall
+            rustfmt
+            clippy
+            rust-analyzer
+            lld
+            openssl
+            pkg-config
+            webkitgtk_4_1
+            libcanberra-gtk3
+            xdotool
+            libxkbcommon
+            libepoxy
+            cairo
+            gdk-pixbuf
+            atk
+            gtk3
+          ];
 
-        # Override the python package set to include custom asf-search
-        python-with-overrides = pkgs.python3.override {
-          packageOverrides = final: prev: {
-            asf-search = final.buildPythonPackage rec {
-              pname = "asf_search";
-              version = "10.1.0";
-              format = "wheel";
-
-              src = pkgs.fetchPypi {
-                inherit pname version;
-                format = "wheel";
-                dist = "py3";
-                python = "py3";
-                abi = "none";
-                platform = "any";
-                hash = "sha256-bk3OBpy3MT8G551mEbPnDw+/GUX8eRzRfctC4KrNiWA=";
-              };
-
-              propagatedBuildInputs = with final; [
-                requests
-                python-dateutil
-                shapely
-                pytz
-                dateparser
-              ];
-
-              doCheck = false;
-            };
-          };
-        };
-
-        python-env = python-with-overrides.withPackages (python-pkgs: [
-          python-pkgs.pip
-          python-pkgs.setuptools
-          python-pkgs.pandas
-          python-pkgs.requests
-          python-pkgs.numpy
-          python-pkgs.torch
-          python-pkgs.scikit-learn
-          python-pkgs.matplotlib
-          python-pkgs.gdal
-          python-pkgs.tqdm
-          python-pkgs.python-dotenv
-          python-pkgs.asf-search  # Now uses the overridden version
-          python-pkgs.tenacity
-          python-pkgs.boto3
-          python-pkgs.fiona
-          python-pkgs.pyproj
-          python-pkgs.scikit-image
-          python-pkgs.joblib
-
-          python-pkgs.ipython
-          python-pkgs.black
-        ]);
-      in {
-        packages.default = pkgs.writeShellApplication {
-          name = "embercastaigui";
-          runtimeInputs = [ python-env ];
-          text = ''
-            exec ${python-env}/bin/python3 assets/scripts/process.py "$@"
+          OPENSSL_DIR = "${pkgs.openssl.out}";
+          OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
+          OPENSSL_INCLUDE_DIR = "${pkgs.openssl.dev}/include";
+          PKG_CONFIG_PATH = "${pkgs.openssl.dev}/lib/pkgconfig";
+          
+          shellHook = ''
+            export PATH="$HOME/.cargo/bin:$PATH"
+            echo "Rust + OpenSSL development environment loaded."
+            
+            if ! rustup target list --installed | grep -q "wasm32-unknown-unknown"; then
+              echo "Installing wasm32-unknown-unknown target..."
+              rustup target add wasm32-unknown-unknown
+            fi
+            
+            if ! command -v dx &> /dev/null; then
+              echo "Installing dioxus-cli..."
+              cargo binstall dioxus-cli --force --no-confirm
+            fi
           '';
         };
 
-        apps.default = flake-utils.lib.mkApp {
-          drv = self.packages.${system}.default;
-          exePath = "/bin/embercastaigui";
+        # Add this apps section
+        apps.default = {
+          type = "app";
+          program = toString (pkgs.writeShellScript "dx-build" ''
+            export PATH="$HOME/.cargo/bin:$PATH"
+            ${pkgs.lib.getExe pkgs.cargo-binstall} dioxus-cli --force --no-confirm 2>/dev/null || true
+            exec dx bundle --release
+          '');
         };
-
-        devShells.default = pkgs.mkShell {
-          packages = [ python-env ];
-        };
-      });
+      }
+    );
 }
