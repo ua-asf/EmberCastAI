@@ -1,0 +1,43 @@
+[package]
+name = "EmberCastAIGUI"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+base64 = { version = "0.22.1", default-features = false }
+chrono = { version = "0.4.42", features = ["clock"], default-features = false }
+dioxus = { version = "0.6.3", features = ["asset", "document", "hooks", "html", "launch", "macro", "signals"], default-features = false }
+image = { version = "0.25.8", default-features = false }
+reqwest = { version = "0.12.23", features = ["json"], default-features = false }
+serde_json = "1.0.145"
+tokio = "1.47.1"
+
+[features]
+default = ["desktop"]
+web = ["dioxus/web"]
+desktop = ["dioxus/desktop"]
+mobile = ["dioxus/mobile"]
+
+[profile]
+
+[profile.wasm-dev]
+inherits = "dev"
+opt-level = 1
+
+[profile.server-dev]
+inherits = "dev"
+
+[profile.android-dev]
+inherits = "dev"
+
+[profile.release]
+opt-level = 'z'
+lto = true
+strip = true
+debug = false
+panic = "abort"
+
+[profile.release.package.'*']
+opt-level = 'z'
+strip = true
+debug = false
