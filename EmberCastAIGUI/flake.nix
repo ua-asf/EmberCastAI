@@ -4,22 +4,24 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
+    fenix.url = "github:nix-community/fenix";
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
+  outputs = { self, nixpkgs, flake-utils, fenix }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
+        # Combine nightly toolchain with wasm target
+        toolchain = fenix.packages.${system}.combine [
+          fenix.packages.${system}.complete.toolchain
+          fenix.packages.${system}.targets.wasm32-unknown-unknown.latest.rust-std
+        ];
       in
       {
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [
-            rustc
-            cargo
+            toolchain  # Includes nightly rustc, cargo, rust-src, etc.
             cargo-binstall
-            rustfmt
-            clippy
-            rust-analyzer
             lld
             openssl
             pkg-config
@@ -41,12 +43,7 @@
           
           shellHook = ''
             export PATH="$HOME/.cargo/bin:$PATH"
-            echo "Rust + OpenSSL development environment loaded."
-            
-            if ! rustup target list --installed | grep -q "wasm32-unknown-unknown"; then
-              echo "Installing wasm32-unknown-unknown target..."
-              rustup target add wasm32-unknown-unknown
-            fi
+            echo "Rust nightly development environment loaded."
             
             if ! command -v dx &> /dev/null; then
               echo "Installing dioxus-cli..."
@@ -55,10 +52,9 @@
           '';
         };
 
-        # Add this apps section
         apps.default = {
           type = "app";
-          program = toString (pkgs.writeShellScript "dx-build" ''
+          program = toString (pkgs.writeShellScript "dx-bundle" ''
             export PATH="$HOME/.cargo/bin:$PATH"
             ${pkgs.lib.getExe pkgs.cargo-binstall} dioxus-cli --force --no-confirm 2>/dev/null || true
             exec dx bundle --release
@@ -67,3 +63,5 @@
       }
     );
 }
+
+
