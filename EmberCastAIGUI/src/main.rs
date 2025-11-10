@@ -11,16 +11,17 @@ fn main() {
     dioxus::launch(App);
 }
 
-static USERNAME: GlobalSignal<Option<String>> = GlobalSignal::new(|| None);
-static PASSWORD: GlobalSignal<Option<String>> = GlobalSignal::new(|| None);
-static WKT_STRING: GlobalSignal<Option<String>> = GlobalSignal::new(|| None);
-static OUTPUT_DATA: GlobalSignal<ProcessingState> = GlobalSignal::new(|| ProcessingState::Empty);
-static STATUS_MESSAGE: GlobalSignal<Option<String>> = GlobalSignal::new(|| None);
+pub static USERNAME: GlobalSignal<Option<String>> = GlobalSignal::new(|| None);
+pub static PASSWORD: GlobalSignal<Option<String>> = GlobalSignal::new(|| None);
+pub static WKT_STRING: GlobalSignal<Option<String>> = GlobalSignal::new(|| None);
+pub static OUTPUT_DATA: GlobalSignal<ProcessingState> =
+    GlobalSignal::new(|| ProcessingState::Empty);
+pub static STATUS_MESSAGE: GlobalSignal<Option<String>> = GlobalSignal::new(|| None);
+pub static INDEX: GlobalSignal<usize> = GlobalSignal::new(|| 0);
 
-static THROBBER: Asset = asset!("assets/throbber.svg");
-static FONT: Asset = asset!("assets/PixeloidSans.ttf");
+pub static THROBBER: Asset = asset!("assets/throbber.svg");
 
-static API_ENDPOINT: &str = "http://127.0.0.1:8000";
+pub static API_ENDPOINT: &str = "http://127.0.0.1:8000";
 
 enum ProcessingState {
     Empty,
@@ -37,7 +38,7 @@ pub fn App() -> Element {
         Style {
             r#"@font-face {{
                 font-family: 'Pixel';
-                src: url('{FONT}') format('truetype');
+                src: url('assets/fonts/pixeloid/PixeloidSans-mLxMm.ttf') format('truetype');
                 font-weight: 400;
                 font-display: swap;
                 font-style: normal;
@@ -151,7 +152,6 @@ fn UIinputs() -> Element {
                             return;
                         }
                         button_clickable.set(false);
-                        *STATUS_MESSAGE.write() = None;
                         let date_format_str = "%Y-%m-%dT%H:%M:%S";
                         let formatted_date: String = chrono::Local::now()
                             .format(date_format_str)
@@ -277,13 +277,15 @@ async fn run_model(username: &str, password: &str, wkt_string: &str, date: &str)
     println!("Stripped WKT: {}", wkt_stripped);
 
     // Parse coordinates into actual numbers, not strings
-    let wkt_points = match parse_wkt_points(wkt_stripped) {
-        Ok(v) => v,
-        Err(e) => {
-            *STATUS_MESSAGE.write() = Some(format!("Error: Failed to parse WKT points - {}", e));
-            return;
-        }
-    };
+    let wkt_points: Vec<Vec<[f64; 2]>> = vec![
+        wkt_stripped
+            .split(", ")
+            .map(|v| {
+                let (x, y) = v.split_once(" ").unwrap();
+                [x.parse::<f64>().unwrap(), y.parse::<f64>().unwrap()]
+            })
+            .collect(),
+    ];
 
     // Use serde_json for proper structure
     let data = json!({
@@ -415,28 +417,6 @@ async fn run_model(username: &str, password: &str, wkt_string: &str, date: &str)
         before: before_final,
         after: after_final,
     };
-}
-
-fn parse_wkt_points(wkt_stripped: &str) -> Result<Vec<Vec<[f64; 2]>>, String> {
-    let points: Result<Vec<[f64; 2]>, String> = wkt_stripped
-        .split(", ")
-        .map(|v| {
-            let (x, y) = v
-                .split_once(" ")
-                .ok_or_else(|| format!("Invalid point format: '{}'", v))?;
-
-            let x = x
-                .parse::<f64>()
-                .map_err(|e| format!("Failed to parse x coordinate '{}': {}", x, e))?;
-            let y = y
-                .parse::<f64>()
-                .map_err(|e| format!("Failed to parse y coordinate '{}': {}", y, e))?;
-
-            Ok([x, y])
-        })
-        .collect();
-
-    Ok(vec![points?])
 }
 
 /// Overlays non-black pixels from `src` onto `dst`.

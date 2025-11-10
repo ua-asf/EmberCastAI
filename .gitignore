@@ -11,5 +11,3 @@ env.sh
 .venv
 __pycache__
 EmberCastAIGUI/assets/tmp
-result
-checkpoints/checkpoint*
