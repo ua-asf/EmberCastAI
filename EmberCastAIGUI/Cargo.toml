@@ -28,12 +28,19 @@ inherits = "dev"
 
 [profile.release]
 opt-level = 3
+codegen-units = 1
 lto = true
 strip = true
-debug = false
 panic = "abort"
 
+[profile.wasm-release]
+inherits = "release"
+opt-level = 'z'
+
 [profile.release.package.'*']
-opt-level = 3
+opt-level = 'z'
 strip = true
 debug = false
+
+[profile.release.package.'image']
+opt-level = 3
