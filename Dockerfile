@@ -20,11 +20,10 @@ RUN pip3 install --no-cache-dir --break-system-packages --ignore-installed numpy
 # Copy application files
 COPY *.py ./
 COPY checkpoints/best_model.pth ./checkpoints/
-COPY env.sh ./
 
 # Setup temp directories
 RUN mkdir -p /tmp/matplotlib && chmod -R 777 /tmp
 
 EXPOSE 8000
 
-CMD ["bash", "-c", "source /app/env.sh && exec uvicorn api:app --host 0.0.0.0 --port 8000"]
+CMD ["exec uvicorn api:app --host 0.0.0.0 --port 8000"]

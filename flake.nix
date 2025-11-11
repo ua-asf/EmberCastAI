@@ -158,7 +158,7 @@
               Cmd = [
               "${pkgs.bash}/bin/bash"
               "-c"
-              "source /app/env.sh && exec ${python-env}/bin/uvicorn api:app --host 0.0.0.0 --port 8000"
+              "exec ${python-env}/bin/uvicorn api:app --host 0.0.0.0 --port 8000"
             ];
             WorkingDir = "/app";
             ExposedPorts = {
