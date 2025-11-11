@@ -152,6 +152,7 @@ fn UIinputs() -> Element {
                             return;
                         }
                         button_clickable.set(false);
+                        *STATUS_MESSAGE.write() = None;
                         let date_format_str = "%Y-%m-%dT%H:%M:%S";
                         let formatted_date: String = chrono::Local::now()
                             .format(date_format_str)
