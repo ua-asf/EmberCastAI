@@ -110,3 +110,16 @@ jobs:
           folder: docs
           target-folder: docs
           commit-message: "chore(cd): Deploy to GH Pages for ${{ env.VERSION }}"
+
+  build-docker:
+    runs-on: ubuntu-latest
+    needs: [get-version, create-release]
+    env:
+      VERSION: ${{ needs.create-release.outputs.tag }}
+    steps:
+      - name: Build and Upload Image Artifact
+        if: ${{ !github.event.act }}
+        uses: macbre/push-to-ghcr@master
+        with:
+          image_name: "embercastai:${{ env.VERSION }}"
+          github_token: ${{ secrets.GITHUB_TOKEN }}
