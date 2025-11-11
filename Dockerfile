@@ -1,31 +1,30 @@
-## Dockerfile 
-## Instructions:
-## 1. Build the image: docker build -t get-and-crop-sar .
-## 2. Run the container: docker run -it --rm -v ${PWD}/organized_dataset:/EmberCastAI/organized_dataset get-and-crop-sar  
+FROM ghcr.io/osgeo/gdal:ubuntu-full-3.12.0
 
-# Use latest GDAL ubuntu image
-FROM ghcr.io/osgeo/gdal:ubuntu-small-latest
-
-# Install dependencies
+# Install Python and pip
 RUN apt-get update && apt-get install -y \
-    python3-pip \
-    python3-venv \
-    python3-dev \
-    build-essential
+  python3-pip \
+  python3-dev \
+  bash \
+  && rm -rf /var/lib/apt/lists/*
 
-# Set the working directory in the container
-WORKDIR /EmberCastAI
+# Set environment variables
+ENV MPLCONFIGDIR=/tmp/matplotlib
+ENV TMPDIR=/tmp
 
-# Copy the necessary files to the container
-COPY . .
+WORKDIR /app
 
-# Install the necessary Python libraries
-RUN python3 -m venv /opt/venv && \
-    /opt/venv/bin/pip install --upgrade pip && \
-    /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
+# Copy and install requirements
+COPY requirements.txt .
+RUN pip3 install --no-cache-dir --break-system-packages --ignore-installed numpy -r requirements.txt
 
-# Get the path for the venv
-ENV PATH="/opt/venv/bin:$PATH"
+# Copy application files
+COPY *.py ./
+COPY checkpoints/best_model.pth ./checkpoints/
+COPY env.sh ./
 
-# Run the script
-CMD ["python", "get_and_crop_sar.py"]
+# Setup temp directories
+RUN mkdir -p /tmp/matplotlib && chmod -R 777 /tmp
+
+EXPOSE 8000
+
+CMD ["bash", "-c", "source /app/env.sh && exec uvicorn api:app --host 0.0.0.0 --port 8000"]
