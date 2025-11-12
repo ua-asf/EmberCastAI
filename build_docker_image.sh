@@ -9,4 +9,4 @@ else
   docker build . -t fastapi-app
 fi
 
-sudo docker run -v ./env.sh:/app/env.sh:ro -p 8000:8000 fastapi-app:latest
+sudo docker run -v ./env.sh:/app/env.sh:ro -p 8000:8000 ua-asf/embercastai:latest

@@ -123,5 +123,5 @@ jobs:
         if: ${{ !github.event.act }}
         uses: macbre/push-to-ghcr@master
         with:
-          image_name: "embercastai"
+          image_name: "ua-asf/embercastai"
           github_token: ${{ secrets.GITHUB_TOKEN }}

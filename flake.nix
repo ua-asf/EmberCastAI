@@ -103,23 +103,17 @@
         };
 
         python-env = python-with-overrides.withPackages (python-pkgs: [
-          python-pkgs.pip
           python-pkgs.bmi-topography
           python-pkgs.setuptools
           python-pkgs.pandas
           python-pkgs.requests
           python-pkgs.numpy
           python-pkgs.torch
-          python-pkgs.scikit-learn
-          python-pkgs.matplotlib
           python-pkgs.gdal
-          python-pkgs.tqdm
           python-pkgs.python-dotenv
           python-pkgs.asf-search
           python-pkgs.asf-tools
-          python-pkgs.tenacity
           python-pkgs.geopandas
-          python-pkgs.boto3
           python-pkgs.fiona
           python-pkgs.owslib
           python-pkgs.pyproj
@@ -132,21 +126,25 @@
           pkgs.bash
         ]);
 
+        python-dev = python-with-overrides.withPackages (python-pkgs: [
+          python-pkgs.boto3
+          python-pkgs.tqdm
+          pkgs.python3Packages.black
+          pkgs.python3Packages.isort
+          pkgs.python3Packages.mypy
+          pkgs.coreutils
+        ]);
+
         dockerImage = pkgs.dockerTools.buildImage {
-          name = "fastapi-app";
+          name = "embercastai";
           tag = "latest";
           
           copyToRoot = pkgs.buildEnv {
             name = "app-root";
             paths = [
               python-env
-              pkgs.coreutils
               (pkgs.runCommand "copy-python-files" {} ''
                 mkdir -p $out/app
-                # matplotlib is special and makes me
-                # write more code than I want to
-                mkdir -p $out/tmp/matplotlib
-                chmod -R 777 $out/tmp
                 cp ${./.}/*.py $out/app/
                 mkdir -p $out/app/checkpoints
                 cp ${./.}/checkpoints/best_model.pth $out/app/checkpoints/best_model.pth
@@ -176,7 +174,7 @@
 
       in {
         devShells.default = pkgs.mkShell {
-          packages = [ python-env ];
+          packages = [ python-env python-dev ];
           shellHook = ''
             source ./env.sh
           '';
