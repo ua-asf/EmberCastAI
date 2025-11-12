@@ -14,12 +14,9 @@ requests
 torch
 numpy
 scikit-learn
-matplotlib
-tqdm
 python-dotenv
 tenacity
 geopandas
-boto3
 fiona
 owslib
 pyproj

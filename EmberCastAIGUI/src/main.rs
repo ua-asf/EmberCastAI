@@ -372,7 +372,7 @@ async fn run_model(username: &str, password: &str, wkt_string: &str, date: &str)
     // The before image will be the dem with the original image overlaid on top
     let mut before_final = dem_image.clone();
 
-    let before_rgb = original
+    let mut before_rgb = original
         .iter()
         .flat_map(|v| {
             let pixel_brightness = *v as f32 / 255.0;
@@ -408,6 +408,11 @@ async fn run_model(username: &str, password: &str, wkt_string: &str, date: &str)
         &RgbImage::from_vec(dimensions[0] as u32, dimensions[1] as u32, after_rgb).unwrap(),
     );
 
+    // Make the original data yellow to distinguish it from the model's predictions
+    before_rgb.chunks_exact_mut(3).for_each(|v| {
+        v[1] = v[0]; // G
+    });
+
     // Add the original data in yellow
     overlay_non_black(
         &mut after_final,
@@ -436,9 +441,9 @@ fn overlay_non_black(dst: &mut RgbImage, src: &RgbImage) {
 
             let dst_pixel = dst.get_pixel(x, y);
 
-            new_pixel[0] = (new_pixel[0] as u16 + dst_pixel[0] as u16).min(255) as u8;
-            new_pixel[1] = (new_pixel[1] as u16 + dst_pixel[1] as u16).min(255) as u8;
-            new_pixel[2] = (new_pixel[2] as u16 + dst_pixel[2] as u16).min(255) as u8;
+            new_pixel[0] = new_pixel[0].saturating_add(dst_pixel[0]);
+            new_pixel[1] = new_pixel[1].saturating_add(dst_pixel[1]);
+            new_pixel[2] = new_pixel[2].saturating_add(dst_pixel[2]);
 
             dst.put_pixel(x, y, new_pixel);
         }
