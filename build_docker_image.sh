@@ -2,7 +2,7 @@
 
 if command -v "nix" >/dev/null 2>&1; then
   echo "Building with nix."
-  nix build #.docker
+  nix build --extra-experimental-features flakes --extra-experimental-features nix-command #.docker
   sudo docker load <result
 else
   echo "Building with Docker."
