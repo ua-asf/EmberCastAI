@@ -13,6 +13,7 @@ pandas
 requests
 torch
 numpy
+boto3
 scikit-learn
 python-dotenv
 tenacity

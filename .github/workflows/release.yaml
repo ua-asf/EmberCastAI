@@ -96,7 +96,7 @@ jobs:
           path: |
             /nix/store
             ~/.cache/nix
-          key: nix-${{ runner.os }}-${{ hashFiles('**/flake.lock') }}
+          key: nix-${{ runner.os }}-${{ hashFiles('EmberCastAIGUI/flake.lock') }}
           restore-keys: |
             nix-${{ runner.os }}-
 
@@ -144,7 +144,7 @@ jobs:
           path: |
             /nix/store
             ~/.cache/nix
-          key: nix-docker-${{ runner.os }}-${{ hashFiles('**/flake.lock') }}
+          key: nix-docker-${{ runner.os }}-${{ hashFiles('flake.lock') }}
           restore-keys: |
             nix-docker-${{ runner.os }}-
 
