@@ -124,7 +124,6 @@
           python-pkgs.tenacity
           python-pkgs.uvicorn
           python-pkgs.pydantic
-          pkgs.bash
         ]);
 
         python-dev = python-with-overrides.withPackages (python-pkgs: [
@@ -134,6 +133,7 @@
           pkgs.python3Packages.isort
           pkgs.python3Packages.mypy
           pkgs.coreutils
+          pkgs.bash
         ]);
 
         dockerImage = pkgs.dockerTools.buildImage {
@@ -145,6 +145,10 @@
             paths = [
               python-env
               (pkgs.runCommand "copy-python-files" {} ''
+                # matplotlib is special and makes me
+                # write more code than I want to
+                mkdir -p $out/tmp/matplotlib
+                chmod -R 777 $out/tmp
                 mkdir -p $out/app
                 cp ${./.}/*.py $out/app/
                 mkdir -p $out/app/checkpoints
