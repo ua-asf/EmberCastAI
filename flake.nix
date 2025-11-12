@@ -121,6 +121,7 @@
           python-pkgs.scikit-image
           python-pkgs.joblib
           python-pkgs.fastapi
+          python-pkgs.tenacity
           python-pkgs.uvicorn
           python-pkgs.pydantic
           pkgs.bash
@@ -136,7 +137,7 @@
         ]);
 
         dockerImage = pkgs.dockerTools.buildImage {
-          name = "embercastai";
+          name = "ua-asf/embercastai";
           tag = "latest";
           
           copyToRoot = pkgs.buildEnv {

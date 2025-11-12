@@ -1,5 +1,6 @@
 from osgeo import gdal, ogr, osr
 import math
+import numpy as np
 
 cutline_shp = "/vsimem/cutline.shp"
 
@@ -115,10 +116,6 @@ def utm_from_lon_lat(lon: float, lat: float) -> int:
     hemisphere = 32600 if lat >= 0 else 32700
     zone = int(lon // 6 + 30) % 60 + 1
     return hemisphere + zone
-
-
-from osgeo import gdal, osr
-import math
 
 
 def crop_and_scale_to_20x20(
@@ -397,9 +394,6 @@ def merge_geotiffs(geotiffs, output_file):
     out_ds = None
 
     print(f"Merged {len(geotiffs)} geotiffs into: {output_file}")
-
-
-import numpy as np
 
 
 def convert_to_uint16(band):

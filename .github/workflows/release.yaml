@@ -83,8 +83,22 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
       - name: Install Nix
-        uses: cachix/install-nix-action@v27
+        uses: cachix/install-nix-action@v31
+
+      - name: Cache Nix store
+        uses: actions/cache@v4
+        if: ${{ !github.event.act }}
+        with:
+          path: |
+            /nix/store
+            ~/.cache/nix
+          key: nix-${{ runner.os }}-${{ hashFiles('**/flake.lock') }}
+          restore-keys: |
+            nix-${{ runner.os }}-
 
       - name: Change Dioxus.toml for web-deployment
         run: |
@@ -119,9 +133,38 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
-      - name: Build and Upload Image Artifact
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+
+      - name: Cache Nix store
+        uses: actions/cache@v4
         if: ${{ !github.event.act }}
-        uses: macbre/push-to-ghcr@master
         with:
-          image_name: "ua-asf/embercastai"
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          path: |
+            /nix/store
+            ~/.cache/nix
+          key: nix-docker-${{ runner.os }}-${{ hashFiles('**/flake.lock') }}
+          restore-keys: |
+            nix-docker-${{ runner.os }}-
+
+      - name: Build Docker Container
+        run: |
+          nix build --extra-experimental-features flakes --extra-experimental-features nix-command #.docker
+          sudo docker load <result
+
+      - name: Login to GHCR
+        if: ${{ !github.event.act }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tag and Push to GHCR
+        if: ${{ !github.event.act }}
+        run: |
+          docker tag ua-asf/embercastai ghcr.io/ua-asf/embercastai:${{ env.VERSION }}
+          docker tag ua-asf/embercastai ghcr.io/ua-asf/embercastai:latest
+          docker push ghcr.io/ua-asf/embercastai:${{ env.VERSION }}
+          docker push ghcr.io/ua-asf/embercastai:latest
