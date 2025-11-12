@@ -104,6 +104,7 @@
 
         python-env = python-with-overrides.withPackages (python-pkgs: [
           python-pkgs.bmi-topography
+          python-pkgs.boto3
           python-pkgs.setuptools
           python-pkgs.pandas
           python-pkgs.requests
@@ -116,10 +117,8 @@
           python-pkgs.geopandas
           python-pkgs.fiona
           python-pkgs.owslib
-          python-pkgs.pyproj
           python-pkgs.scikit-learn
           python-pkgs.scikit-image
-          python-pkgs.joblib
           python-pkgs.fastapi
           python-pkgs.tenacity
           python-pkgs.uvicorn
@@ -127,8 +126,9 @@
         ]);
 
         python-dev = python-with-overrides.withPackages (python-pkgs: [
-          python-pkgs.boto3
           python-pkgs.tqdm
+          python-pkgs.joblib
+          python-pkgs.pyproj
           pkgs.python3Packages.black
           pkgs.python3Packages.isort
           pkgs.python3Packages.mypy
@@ -150,7 +150,19 @@
                 mkdir -p $out/tmp/matplotlib
                 chmod -R 777 $out/tmp
                 mkdir -p $out/app
-                cp ${./.}/*.py $out/app/
+                
+                # Copy all used python files
+                cp ${./.}/api.py $out/app/
+                cp ${./.}/cde_data.py $out/app/
+                cp ${./.}/dem.py $out/app/
+                cp ${./.}/model.py $out/app/
+                cp ${./.}/ship.py $out/app/
+                cp ${./.}/cmr.py $out/app/
+                cp ${./.}/geo.py $out/app/
+                cp ${./.}/gamma.py $out/app/
+                cp ${./.}/utils.py $out/app/
+                cp ${./.}/wkt_processing.py $out/app/
+
                 mkdir -p $out/app/checkpoints
                 cp ${./.}/checkpoints/best_model.pth $out/app/checkpoints/best_model.pth
               '')
