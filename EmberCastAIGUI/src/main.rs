@@ -14,9 +14,9 @@ fn main() {
 static USERNAME: GlobalSignal<Option<String>> = GlobalSignal::new(|| None);
 static PASSWORD: GlobalSignal<Option<String>> = GlobalSignal::new(|| None);
 static WKT_STRING: GlobalSignal<Option<String>> = GlobalSignal::new(|| None);
+static OPENTOPO_KEY: GlobalSignal<Option<String>> = GlobalSignal::new(|| None);
 static OUTPUT_DATA: GlobalSignal<ProcessingState> = GlobalSignal::new(|| ProcessingState::Empty);
 static STATUS_MESSAGE: GlobalSignal<Option<String>> = GlobalSignal::new(|| None);
-static INDEX: GlobalSignal<usize> = GlobalSignal::new(|| 0);
 
 static THROBBER: Asset = asset!("assets/throbber.svg");
 static FONT: Asset = asset!("assets/PixeloidSans.ttf");
@@ -61,6 +61,11 @@ pub fn App() -> Element {
             input {{
                 font-family: 'Pixel';
                 text-align: center;
+            }}
+
+            option {{
+                font-family: 'Pixel';
+                text-align: center;
             }}"#
         }
         div { style: "text-align: center;
@@ -82,15 +87,23 @@ pub fn App() -> Element {
     }
 }
 
+#[derive(PartialEq)]
+enum OpenTopoKeyState {
+    None,
+    UserProvided,
+}
+
 #[component]
 fn UIinputs() -> Element {
     let mut username_error = use_signal(|| false);
     let mut password_error = use_signal(|| false);
     let mut wkt_string_error = use_signal(|| false);
     let mut button_clickable = use_signal(|| true);
+    let mut topo_key_state = use_signal(|| OpenTopoKeyState::None);
+    let mut topo_key_error = use_signal(|| false);
 
     rsx! {
-        div { style: "display: flex; flex-direction: row; flex: 1 0 auto; justify-content: center; padding: 5px; gap: 20px",
+        div { style: "display: flex; flex-direction: row; flex: 1 0 auto; justify-content: center; padding: 5px; gap: 20px; flex-wrap: wrap;",
             div {
                 p { "Earthdata Username" }
                 input {
@@ -131,6 +144,43 @@ fn UIinputs() -> Element {
                 }
             }
 
+            div {
+                p { "OpenTopograph API Key" }
+                div { style: "display: flex; flex-direction: row; gap: 10px; justify-content: center",
+                    select {
+                        onchange: move |evt| {
+                            let v = evt.value().clone();
+                            match &*v {
+                                "0" => topo_key_state.set(OpenTopoKeyState::None),
+                                "1" => topo_key_state.set(OpenTopoKeyState::UserProvided),
+                                _ => {}
+                            };
+                            topo_key_error.set(false);
+                        },
+                        option { value: 0, "Use Server Key" }
+                        option { value: 1, "Use Personal Key" }
+                    }
+                    match &*topo_key_state.read() {
+                        OpenTopoKeyState::None => {
+                            rsx! {}
+                        }
+                        OpenTopoKeyState::UserProvided => {
+                            rsx! {
+                                input {
+                                    style: format!("border-color: {}", if topo_key_error() { "red" } else { "white" }),
+                                    r#type: "password",
+                                    oninput: move |e| {
+                                        *OPENTOPO_KEY.write() = Some(e.value().clone());
+                                        topo_key_error.set(false);
+                                    },
+                                    value: OPENTOPO_KEY()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             div { style: "margin-top: 20px; display: flex; justify-content: center;",
                 button {
                     style: "width: 100%; padding: 5px;",
@@ -146,6 +196,12 @@ fn UIinputs() -> Element {
                         }
                         if WKT_STRING.read().clone().is_none_or(|v| v.is_empty()) {
                             wkt_string_error.set(true);
+                            errors = true;
+                        }
+                        if *topo_key_state.read() == OpenTopoKeyState::UserProvided
+                            && OPENTOPO_KEY.read().clone().is_none_or(|v| v.is_empty())
+                        {
+                            topo_key_error.set(true);
                             errors = true;
                         }
                         if errors {
@@ -196,8 +252,10 @@ fn RenderImage() -> Element {
             // Render the selected image if any are available
             match *OUTPUT_DATA.read() {
                 ProcessingState::Empty => {
-                    rsx! { p { style: "font-size: 24px;", "No image available" } }
-                },
+                    rsx! {
+                        p { style: "font-size: 24px;", "No image available" }
+                    }
+                }
                 ProcessingState::Processing(ref img_path) => {
                     rsx! {
                         img {
@@ -215,7 +273,7 @@ fn RenderImage() -> Element {
                             }
                         }
                     }
-                },
+                }
                 ProcessingState::Processed { ref before, ref after } => {
                     rsx! {
                         div { style: "display: flex; flex-direction: row; gap: 20px; justify-content: center; align-items: center; padding-top: 10px; padding-bottom: 10px; width: 100%; height: 100%",
