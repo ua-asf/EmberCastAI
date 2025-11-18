@@ -1,3 +1,4 @@
+import asyncio
 import os
 from datetime import datetime, timedelta
 import asf_search as asf
@@ -20,7 +21,6 @@ from geo import (
 from dem import download_dem_from_bounds
 
 from shapely.geometry import Polygon
-
 from model import SimpleFireCNN
 
 # Define the date format string
@@ -84,12 +84,13 @@ def get_wkt_extremes(
     )
 
 
-def get_sar_over_area(
+async def get_sar_over_area(
     username: str,
     password: str,
     date_str: str,
     polygon: list[tuple[float, float]],
     file_path: str,
+    queue: asyncio.Queue | None = None,
 ) -> tuple[str, str]:
     """
     Gets SAR data over the given polygon and date, processing it as needed.
@@ -104,11 +105,17 @@ def get_sar_over_area(
         List of paths to generated GRD files
         Format: `tuple[VV_BAND, VH_BAND]`
     """
+    if queue is not None:
+        await put_msg("text:Authenticating through ASF...", queue)
+        await asyncio.sleep(0)
 
     session = asf.ASFSession()
 
     # Authenticate the session
     session.auth_with_creds(username=username, password=password)
+
+    if queue is not None:
+        await put_msg("text:Searching for SAR data...", queue)
 
     date = datetime.strptime(os.path.basename(date_str), date_format_str)
 
@@ -149,6 +156,8 @@ def get_sar_over_area(
         options["start"] = (date - timedelta(days=delta)).strftime(date_format_str)
 
         if delta > 1000:
+            if queue is not None:
+                await put_msg(f"error:No SAR data found for fire on {date_str}", queue)
             raise ValueError(f"No data found for fire on {date}")
 
         if len(results) > 0:
@@ -162,6 +171,9 @@ def get_sar_over_area(
 
         # === Step 1: Check if a polygon covers the area of the fire polygon ===
 
+        if queue is not None:
+            await put_msg("text:Checking if found data covers fire area...", queue)
+
         polygon_strs = []
 
         for result in results:
@@ -171,15 +183,22 @@ def get_sar_over_area(
             )
             if candidate_polygon.contains_properly(fire_polygon):
                 final_results = [result]
+                if queue is not None:
+                    await put_msg(
+                        "text:Found suitable polygon covering fire area.", queue
+                    )
                 break
-
-        print(f"GEOMETRYCOLLECTION ( {', '.join(polygon_strs)} )")
 
         # Check if we found a suitable polygon
         if len(final_results) == 1:
             break
 
         # === Step 2: Mosacking. Search for polygons that combine to cover the fire polygon ===
+
+        if queue is not None:
+            await put_msg(
+                "text:No suitable single polygon found, checking for mosaics...", queue
+            )
 
         # Check again if we found a suitable set of polygons
         if len(final_results) > 0:
@@ -207,16 +226,21 @@ def get_sar_over_area(
                 final_results = ascending_granules
 
         if len(final_results) > 0:
+            if queue is not None:
+                await put_msg(
+                    f"text:Found suitable mosaic covering fire area, comprised of {len(final_results)} granules.",
+                    queue,
+                )
             break
 
         # === Step 3: No mosaic found, repeat with larger date range ===
+        if queue is not None:
+            await put_msg(
+                "text:No suitable mosaic found, expanding search range...", queue
+            )
         results = []
 
     generated_grds = []
-
-    print(
-        f"Final results: {len(final_results)} granules: {[result.properties['sceneName'] for result in final_results]}"
-    )
 
     for result in final_results:
         if not os.path.isfile(f"tmp/{result.properties['sceneName']}.zip"):
@@ -224,7 +248,18 @@ def get_sar_over_area(
             if not os.path.isdir("tmp"):
                 os.makedirs("tmp")
 
+            if queue is not None:
+                await put_msg(
+                    f"text:Downloading scene {result.properties['sceneName']}...", queue
+                )
+
             result.download(path="tmp", session=session)
+
+        if queue is not None:
+            await put_msg(
+                f"text:Generating geocoded GRD files for scene {result.properties['sceneName']}...",
+                queue,
+            )
 
         generated_grds.append(
             generate_geocoded_grd(
@@ -242,9 +277,9 @@ def get_sar_over_area(
     # Append file path to each generated GRD file
     generated_grds = [f"tmp/{grd}" for grd in generated_grds]
 
-    print(f"Generated {len(generated_grds)} GRD files: {generated_grds}")
-
     if len(generated_grds) > 2:
+        if queue is not None:
+            await put_msg("text:Mosaicking multiple GRD files...", queue)
         return mosaic_sar_bands(
             generated_grds, out_dir=f"{file_path}/data", out_file_name="mosaic"
         )
@@ -252,9 +287,6 @@ def get_sar_over_area(
         return (generated_grds[0], generated_grds[1])
     else:
         raise ValueError(f"Unexpected number of GRD files: {len(generated_grds)}")
-
-
-from shapely.geometry import mapping
 
 
 def get_containing_flight_dir_polygon(results, direction, fire_polygon):
@@ -280,15 +312,6 @@ def get_containing_flight_dir_polygon(results, direction, fire_polygon):
 
         # Skip if the new polygon has more than a certain percentage overlap with the existing candidate polygon
         if candidate_polygon.area != 0 and intersection.area / new_polygon.area > 0.5:
-            print(
-                f"Skipping polygon due to high overlap: POLYGON(( {', '.join([f'{a} {b}' for a, b in result.geometry['coordinates'][0]])} ))"
-            )
-
-            candidate_coords = mapping(candidate_polygon)["coordinates"][0]
-
-            print(
-                f"Current polygon: POLYGON(( {', '.join([f'{coord[0]} {coord[1]}' for coord in candidate_coords])} ))"
-            )
             continue
 
         candidate_polygon = candidate_polygon.union(new_polygon)
@@ -304,8 +327,6 @@ def get_containing_flight_dir_polygon(results, direction, fire_polygon):
     intersection = candidate_polygon.intersection(fire_polygon)
 
     coverage = intersection.area / fire_polygon.area
-
-    print(f"{coverage=}, {candidate_polygon.area=}, {fire_polygon.area=}")
 
     if candidate_polygon.contains_properly(fire_polygon) or coverage > 0.99:
         return mosaic_results
@@ -328,9 +349,6 @@ def mosaic_sar_bands(
     return (f"{out_dir}/{out_file_name}_vv.tiff", f"{out_dir}/{out_file_name}_vh.tiff")
 
 
-from osgeo import gdal
-
-
 def mosaic_geotiffs(tiffs: list[str], dst_path: str):
     options = gdal.WarpOptions(
         format="GTiff",
@@ -338,8 +356,6 @@ def mosaic_geotiffs(tiffs: list[str], dst_path: str):
         multithread=True,
         creationOptions=["COMPRESS=LZW", "TILED=YES"],
     )
-
-    print(f"\n\n\n\n\n\n\nMosaicking {len(tiffs)} files into {dst_path}\n\n\n\n\n\n")
 
     gdal.Warp(
         dst_path,
@@ -374,13 +390,15 @@ def get_hash(extremes):
     return hashlib.sha256(str(extremes).encode()).hexdigest()
 
 
-def get_drawn_wkt(
+async def get_drawn_wkt(
     username: str,
     password: str,
     date_str: str,
     wkt_list: list[list[tuple[float, float]]],
     extremes: tuple[float, float, float, float],
     file_path: str,
+    opentopo_key: str | None = None,
+    queue: asyncio.Queue | None = None,
 ) -> np.ndarray:
     """
     Downloads SAR data for the given WKT polygons and date, processes it, and draws the WKT ontop of an np.
@@ -398,13 +416,17 @@ def get_drawn_wkt(
         (extremes[2] - 0.035, extremes[1] + 0.035),
     ]
 
-    results = get_sar_over_area(
+    results = await get_sar_over_area(
         username=username,
         password=password,
         date_str=date_str,
         polygon=polygon,
         file_path=file_path,
+        queue=queue,
     )
+
+    if queue is not None:
+        await put_msg("text:Downloading DEM data...", queue)
 
     # Download DEM data for the area.
     # We need to add a bit of padding to ensure we cover the entire area
@@ -414,6 +436,7 @@ def get_drawn_wkt(
         extremes[2] - 0.05,
         extremes[3] + 0.05,
         f"{file_path}/data",
+        opentopo_key=opentopo_key,
     )
 
     tiff_files = [
@@ -424,6 +447,10 @@ def get_drawn_wkt(
 
     # Perform translation for 20x20 pixel sizes
     for geotiff in tiff_files:
+        if queue is not None:
+            await put_msg(
+                f"text:Cropping and scaling {geotiff} to 20x20m pixels...", queue
+            )
         crop_and_scale_to_20x20(
             input_tiff_path=geotiff,
             output_tiff_path=geotiff,
@@ -435,6 +462,8 @@ def get_drawn_wkt(
             square_size=SQUARE_SIZE,
         )
 
+    if queue is not None:
+        await put_msg("text:Merging data...", queue)
     # Merge the files into a single geotiff
     merge_geotiffs(tiff_files, output_file=f"{file_path}/data/merged.tiff")
 
@@ -444,11 +473,15 @@ def get_drawn_wkt(
         wkt_strs.append(f"POLYGON(({point_str}))")
 
     input_file = f"{file_path}/data/merged.tiff"
+    if queue is not None:
+        await put_msg("text:Drawing WKT onto data...", queue)
     draw_wkt_to_geotiff(
         wkt_strs, input_file, output_file=f"{file_path}/data/merged_wkt.tiff"
     )
 
     # Open the file and extract the band with the WKT drawn on it
+    if queue is not None:
+        await put_msg("text:Extracting bands from drawn data...", queue)
     return extract_bands_from_tiff(f"{file_path}/data/merged_wkt.tiff")
 
 
@@ -482,7 +515,7 @@ def cut_into_squares(array, square_size=SQUARE_SIZE):
     )
 
 
-def run_inference(squares):
+async def run_inference(squares, queue: asyncio.Queue | None = None):
     """Run inference on the provided data and return the stitched results as a numpy array"""
     # Load checkpoint
     checkpoint = torch.load(
@@ -501,13 +534,17 @@ def run_inference(squares):
 
     results = []
     with torch.no_grad():
-        for square in squares:
+        for i, square in enumerate(squares):
             # Skip processing if the squaure mask is all zeros
             # or all ones
 
+            if queue is not None:
+                await put_msg(
+                    f"text:Running inference on square {i}/{len(squares)}...", queue
+                )
+
             if np.max(square[0]) == 0 or np.min(square[0]) == 65535:
                 results.append(square[0].astype(np.float32) / 65535.0)
-                print("Skipping empty or full square")
                 continue
 
             # Convert to tensor if needed
@@ -556,30 +593,36 @@ def stitch_results(squares, num_squares_x, num_squares_y, square_size=SQUARE_SIZ
     return stitched_array.astype(np.uint8)
 
 
-def process(
+async def process(
     username: str,
     password: str,
     wkt_list: list[list[tuple[float, float]]],
     date_str: str,
+    opentopo_key: str | None = None,
+    queue: asyncio.Queue | None = None,
 ) -> tuple[tuple[int, int], list[int], list[int], list[int]]:
-    data = get_drawn_wkt(
+    data = await get_drawn_wkt(
         username=username,
         password=password,
         date_str=date_str,
         wkt_list=wkt_list,
         extremes=get_wkt_extremes([pt for sublist in wkt_list for pt in sublist]),
         file_path=f"tmp/{get_hash(wkt_list)}",
+        opentopo_key=opentopo_key,
+        queue=queue,
     )
 
-    print(f"Downloaded data shape: {data.shape}")
-
+    if queue is not None:
+        await put_msg("text:Cutting data into squares...", queue)
     squares, num_squares_x, num_squares_y = cut_into_squares(data)
 
-    results = run_inference(squares)
+    results = await run_inference(squares, queue)
 
     print(f"Got {len(results)} results from inference")
     print(f"First result shape: {results[0].shape if results else 'N/A'}")
 
+    if queue is not None:
+        await put_msg("text:Stitching results back together...", queue)
     stitched_results: list[int] = [
         int(x) for x in stitch_results(results, num_squares_x, num_squares_y).flatten()
     ]
@@ -594,6 +637,8 @@ def process(
 
     print(f"DEM min/max: {min(dem_u8)}/{max(dem_u8)}")
 
+    await put_msg("text:Processing complete. Sending results to client.", queue)
+
     return (
         (num_squares_x * SQUARE_SIZE, num_squares_y * SQUARE_SIZE),
         # Original mask (first band)
@@ -603,3 +648,9 @@ def process(
         # Digital elevation model (4th band)
         dem_u8,
     )
+
+
+async def put_msg(msg: str, queue: asyncio.Queue | None):
+    if queue is not None:
+        await queue.put(msg)
+        await asyncio.sleep(0)

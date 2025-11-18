@@ -26,6 +26,7 @@ static API_ENDPOINT: &str = "http://127.0.0.1:8000";
 enum ProcessingState {
     Empty,
     Processing(String), // Throbber or placeholder image location
+    Error,
     Processed { before: RgbImage, after: RgbImage },
 }
 
@@ -61,11 +62,6 @@ pub fn App() -> Element {
             input {{
                 font-family: 'Pixel';
                 text-align: center;
-            }}
-
-            option {{
-                font-family: 'Pixel';
-                text-align: center;
             }}"#
         }
         div { style: "text-align: center;
@@ -73,7 +69,6 @@ pub fn App() -> Element {
             width: 100vw;
             display: flex;
             flex-direction: column;
-            gap: 20px;
             height: 100%;
             flex: 1,
             margin: 0px 0px;
@@ -102,9 +97,11 @@ fn UIinputs() -> Element {
     let mut topo_key_state = use_signal(|| OpenTopoKeyState::None);
     let mut topo_key_error = use_signal(|| false);
 
+    let box_style = "border: 2px solid #FFF; padding: 10px; display: flex; flex-direction: column; justify-content: center; align-items: center;";
+
     rsx! {
-        div { style: "display: flex; flex-direction: row; flex: 1 0 auto; justify-content: center; padding: 5px; gap: 20px; flex-wrap: wrap;",
-            div {
+        div { style: "display: flex; flex-direction: row; flex: 1 0 auto; justify-content: center; padding: 5px; padding-bottom: 0px; padding-top: 0px; flex-wrap: wrap;",
+            div { style: box_style,
                 p { "Earthdata Username" }
                 input {
                     style: format!("border-color: {}", if username_error() { "red" } else { "white" }),
@@ -116,7 +113,7 @@ fn UIinputs() -> Element {
                 }
             }
 
-            div {
+            div { style: box_style,
                 p { "Earthdata Password" }
                 input {
                     style: format!(
@@ -132,7 +129,7 @@ fn UIinputs() -> Element {
                 }
             }
 
-            div {
+            div { style: box_style,
                 p { "WKT String" }
                 input {
                     style: format!("border-color: {}", if wkt_string_error() { "red" } else { "white" }),
@@ -144,7 +141,7 @@ fn UIinputs() -> Element {
                 }
             }
 
-            div {
+            div { style: box_style,
                 p { "OpenTopograph API Key" }
                 div { style: "display: flex; flex-direction: row; gap: 10px; justify-content: center",
                     select {
@@ -173,7 +170,7 @@ fn UIinputs() -> Element {
                                         *OPENTOPO_KEY.write() = Some(e.value().clone());
                                         topo_key_error.set(false);
                                     },
-                                    value: OPENTOPO_KEY()
+                                    value: OPENTOPO_KEY(),
                                 }
                             }
                         }
@@ -181,9 +178,9 @@ fn UIinputs() -> Element {
                 }
             }
 
-            div { style: "margin-top: 20px; display: flex; justify-content: center;",
+            div { style: box_style,
                 button {
-                    style: "width: 100%; padding: 5px;",
+                    style: "width: 100%; height: 100%; padding: 10px;",
                     onclick: move |_| {
                         let mut errors = false;
                         if USERNAME.read().clone().is_none_or(|v| v.is_empty()) {
@@ -204,9 +201,16 @@ fn UIinputs() -> Element {
                             topo_key_error.set(true);
                             errors = true;
                         }
+
                         if errors {
                             return;
                         }
+
+                        let open_topo_key = match &*topo_key_state.read() {
+                            OpenTopoKeyState::None => None,
+                            OpenTopoKeyState::UserProvided => OPENTOPO_KEY.read().clone(),
+                        };
+
                         button_clickable.set(false);
                         *STATUS_MESSAGE.write() = None;
                         let date_format_str = "%Y-%m-%dT%H:%M:%S";
@@ -221,6 +225,7 @@ fn UIinputs() -> Element {
                                     &PASSWORD().unwrap_or_default(),
                                     &WKT_STRING().unwrap_or_default(),
                                     &formatted_date,
+                                    open_topo_key,
                                 )
                                 .await;
                             button_clickable.set(true);
@@ -238,6 +243,8 @@ fn UIinputs() -> Element {
     }
 }
 
+use futures_util::StreamExt;
+
 #[component]
 fn Separator() -> Element {
     rsx! {
@@ -248,7 +255,7 @@ fn Separator() -> Element {
 #[component]
 fn RenderImage() -> Element {
     rsx! {
-        div { style: "display: flex; flex-direction: column; justify-content: start; align-items: center; height: 100vh; width: 100vw; overflow: hidden",
+        div { style: "display: flex; flex-direction: column; justify-content: center; align-items: center; height: 100vh; width: 100vw; overflow: hidden",
             // Render the selected image if any are available
             match *OUTPUT_DATA.read() {
                 ProcessingState::Empty => {
@@ -270,6 +277,17 @@ fn RenderImage() -> Element {
                                 "{message}"
                             } else {
                                 "Processing..."
+                            }
+                        }
+                    }
+                }
+                ProcessingState::Error => {
+                    rsx! {
+                        p { style: "font-size: 24px; color: red;",
+                            if let Some(message) = STATUS_MESSAGE.read().clone() {
+                                "{message}"
+                            } else {
+                                "An unknown error occurred."
                             }
                         }
                     }
@@ -315,6 +333,66 @@ fn RgbImageToBase64(img: RgbImage, border_color: &'static str) -> Element {
     }
 }
 
+/// Handles a streamed response from the server.
+/// This function reads the streamed response and processes it chunk by chunk.
+/// If a returned message starts with `text:` it writes the text to the status message.
+/// If a returned message starts with `image:` it returns that data as a `Some(String)`.
+/// If a returned message starts with `error:` it sets the status message to the error and returns
+/// `None`.
+async fn handle_streamed_response(resp: reqwest::Response) -> Option<String> {
+    if resp.status() != 200 {
+        *STATUS_MESSAGE.write() = Some(format!(
+            "Error: Received status code {}, {}",
+            resp.status(),
+            resp.text().await.unwrap_or_default()
+        ));
+        *OUTPUT_DATA.write() = ProcessingState::Error;
+        return None;
+    }
+
+    let mut stream = resp.bytes_stream();
+
+    while let Some(chunk) = stream.next().await {
+        match chunk {
+            Ok(data) => {
+                let data = String::from_utf8_lossy(&data).to_string();
+
+                let lines = data.split('\n');
+
+                for line in lines {
+                    let text = line.strip_prefix("data: ").unwrap_or(&line).to_string();
+
+                    // Check the prefix of the text
+                    if text.strip_prefix("text:").is_some() {
+                        *STATUS_MESSAGE.write() = Some(text["text:".len()..].to_string());
+                    } else if text.strip_prefix("image:").is_some() {
+                        let image_data = text["image:".len()..].to_string();
+                        return Some(image_data);
+                    } else if text.strip_prefix("error:").is_some() {
+                        *STATUS_MESSAGE.write() =
+                            Some(format!("Error: {}", &text["error:".len()..]));
+                        *OUTPUT_DATA.write() = ProcessingState::Error;
+                        return None;
+                    } else {
+                        continue;
+                    }
+
+                    wasmtimer::tokio::sleep(std::time::Duration::from_millis(25)).await;
+                }
+            }
+            Err(e) => {
+                *STATUS_MESSAGE.write() = Some(format!("Error: Failed to read chunk - {}", e));
+                *OUTPUT_DATA.write() = ProcessingState::Error;
+                return None;
+            }
+        }
+    }
+
+    *STATUS_MESSAGE.write() = Some("Error: No image data received.".to_string());
+    *OUTPUT_DATA.write() = ProcessingState::Error;
+    None
+}
+
 /// Runs the model using the provided parameters.
 /// This function spawns a new process using the `nix run` command.
 ///
@@ -326,8 +404,13 @@ fn RgbImageToBase64(img: RgbImage, border_color: &'static str) -> Element {
 ///
 /// # Returns
 /// This function does not return a value. It spawns a process and waits for it to finish.
-/// The output file path is stored in the `OUTPUT_FILE` global signal.
-async fn run_model(username: &str, password: &str, wkt_string: &str, date: &str) {
+async fn run_model(
+    username: &str,
+    password: &str,
+    wkt_string: &str,
+    date: &str,
+    open_topo_key: Option<String>,
+) {
     // Strip all of the possible prefix combinations from the WKT string
     let wkt_prefix_stripped = strip_prefixes(wkt_string, &["POLYGON", " ", "((", " "]);
 
@@ -336,28 +419,58 @@ async fn run_model(username: &str, password: &str, wkt_string: &str, date: &str)
     println!("Stripped WKT: {}", wkt_stripped);
 
     // Parse coordinates into actual numbers, not strings
-    let wkt_points: Vec<Vec<[f64; 2]>> = vec![
-        wkt_stripped
+    let wkt_points: Vec<Vec<[f64; 2]>> = vec![{
+        let result: Result<Vec<[f64; 2]>, String> = wkt_stripped
             .split(", ")
             .map(|v| {
-                let (x, y) = v.split_once(" ").unwrap();
-                [x.parse::<f64>().unwrap(), y.parse::<f64>().unwrap()]
+                // Split into x and y components
+                let (x_str, y_str) = v.split_once(" ").ok_or_else(|| {
+                    format!(
+                        "Invalid coordinate format: '{}'. Use 'POLYGON((LAT LONG, .. ))'",
+                        v
+                    )
+                })?;
+
+                // Parse x coordinate
+                let x = x_str
+                    .parse::<f64>()
+                    .map_err(|e| format!("Invalid x coordinate '{}': {}", x_str, e))?;
+
+                // Parse y coordinate
+                let y = y_str
+                    .parse::<f64>()
+                    .map_err(|e| format!("Invalid y coordinate '{}': {}", y_str, e))?;
+
+                Ok([x, y])
             })
-            .collect(),
-    ];
+            .collect();
+
+        match result {
+            Ok(coords) => coords,
+            Err(e) => {
+                *STATUS_MESSAGE.write() = Some(format!("Failed to parse WKT coordinates: {}", e));
+                *OUTPUT_DATA.write() = ProcessingState::Error;
+                return;
+            }
+        }
+    }];
 
     // Use serde_json for proper structure
-    let data = json!({
+    let mut data = json!({
         "username": username,
         "password": password,
         "wkt_points": wkt_points,
         "date_str": date,
     });
 
+    if let Some(key) = open_topo_key {
+        data["opentopo_key"] = json!(key);
+    }
+
     let client = reqwest::Client::new();
 
     let response = match client
-        .post(format!("{}/process_wkt", API_ENDPOINT))
+        .post(format!("{}/process_wkt_streaming", API_ENDPOINT))
         .json(&data)
         .send()
         .await
@@ -365,6 +478,7 @@ async fn run_model(username: &str, password: &str, wkt_string: &str, date: &str)
         Ok(resp) => resp,
         Err(e) => {
             *STATUS_MESSAGE.write() = Some(format!("Error: Failed to send request - {}", e));
+            *OUTPUT_DATA.write() = ProcessingState::Error;
             return;
         }
     };
@@ -375,13 +489,20 @@ async fn run_model(username: &str, password: &str, wkt_string: &str, date: &str)
             response.status(),
             response.text().await.unwrap_or_default()
         ));
+        *OUTPUT_DATA.write() = ProcessingState::Error;
         return;
     }
 
-    // Reset status message
-    *STATUS_MESSAGE.write() = None;
+    let result = match handle_streamed_response(response).await {
+        Some(data) => data,
+        None => {
+            // Error message already set in handle_streamed_response
+            return;
+        }
+    };
 
-    let result = response.text().await.unwrap_or_default();
+    *STATUS_MESSAGE.write() = Some(result.clone());
+    *OUTPUT_DATA.write() = ProcessingState::Error;
 
     // Process result into two IntImage structs
     // Turn response into json

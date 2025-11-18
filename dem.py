@@ -15,6 +15,7 @@ def download_dem_from_bounds(
     lon_max: float,
     output_dir: str,
     dem_type: str = "NASADEM",
+    opentopo_key: str | None = None,
 ):
     """
     Download DEM data for a fire area using bmi-topography.
@@ -45,6 +46,9 @@ def download_dem_from_bounds(
             output_format="GTiff",
             cache_dir=output_dir,
         )
+
+        if opentopo_key:
+            topo._api_key = opentopo_key
 
         # Download the DEM data
         file_path = topo.fetch()
