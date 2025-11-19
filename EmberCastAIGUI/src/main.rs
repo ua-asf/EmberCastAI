@@ -500,10 +500,7 @@ async fn run_model(
             return;
         }
     };
-
-    *STATUS_MESSAGE.write() = Some(result.clone());
-    *OUTPUT_DATA.write() = ProcessingState::Error;
-
+    
     // Process result into two IntImage structs
     // Turn response into json
 
